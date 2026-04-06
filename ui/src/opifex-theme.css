@@ -1,0 +1,132 @@
+/*
+ * OPIFEX Theme — v3
+ * Oscuro carbón + Claro gris cálido + Profundidad
+ */
+
+/* ============================================================
+   TEMA OSCURO — carbón
+   ============================================================ */
+
+.dark {
+  --background: oklch(22% 0.005 240) !important;
+  --foreground: oklch(93% 0.005 240) !important;
+  --sidebar: oklch(19% 0.005 240) !important;
+  --sidebar-foreground: oklch(90% 0.005 240) !important;
+  --sidebar-border: oklch(30% 0.006 240) !important;
+  --sidebar-primary: var(--cyan-9) !important;
+  --sidebar-primary-foreground: oklch(15% 0.02 195) !important;
+  --card: oklch(26% 0.005 240) !important;
+  --card-foreground: oklch(93% 0.005 240) !important;
+  --popover: oklch(26% 0.005 240) !important;
+  --popover-foreground: oklch(93% 0.005 240) !important;
+  --primary: var(--cyan-9) !important;
+  --primary-foreground: oklch(15% 0.02 195) !important;
+  --secondary: oklch(29% 0.004 240) !important;
+  --secondary-foreground: oklch(90% 0.005 240) !important;
+  --muted: oklch(29% 0.004 240) !important;
+  --muted-foreground: oklch(65% 0.005 240) !important;
+  --accent: oklch(28% 0.008 240) !important;
+  --accent-foreground: oklch(93% 0.005 240) !important;
+  --destructive: oklch(55% 0.2 25) !important;
+  --border: oklch(33% 0.006 240) !important;
+  --input: oklch(30% 0.005 240) !important;
+  --ring: var(--cyan-7) !important;
+}
+
+/* ============================================================
+   TEMA CLARO — gris cálido
+   ============================================================ */
+
+:root:not(.dark) {
+  --background: oklch(90% 0.008 80) !important;
+  --foreground: oklch(15% 0.01 80) !important;
+  --sidebar: oklch(86% 0.01 80) !important;
+  --sidebar-foreground: oklch(20% 0.01 80) !important;
+  --sidebar-border: oklch(78% 0.01 80) !important;
+  --sidebar-primary: var(--cyan-9) !important;
+  --sidebar-primary-foreground: oklch(98% 0.01 195) !important;
+  --card: oklch(95% 0.004 80) !important;
+  --card-foreground: oklch(15% 0.01 80) !important;
+  --popover: oklch(95% 0.004 80) !important;
+  --popover-foreground: oklch(15% 0.01 80) !important;
+  --primary: var(--cyan-9) !important;
+  --primary-foreground: oklch(98% 0.01 195) !important;
+  --secondary: oklch(88% 0.005 80) !important;
+  --secondary-foreground: oklch(25% 0.01 80) !important;
+  --muted: oklch(86% 0.006 80) !important;
+  --muted-foreground: oklch(40% 0.01 230) !important;
+  --accent: oklch(92% 0.01 200) !important;
+  --accent-foreground: oklch(20% 0.01 230) !important;
+  --border: oklch(80% 0.01 80) !important;
+  --input: oklch(80% 0.01 80) !important;
+  --ring: var(--cyan-7) !important;
+}
+
+/* ============================================================
+   ACENTO CYAN (ambos temas)
+   ============================================================ */
+
+.dark,
+:root:not(.dark) {
+  --accentBase: var(--cyan-1) !important;
+  --accentBgSubtle: var(--cyan-2) !important;
+  --accentBg: var(--cyan-3) !important;
+  --accentBgHover: var(--cyan-4) !important;
+  --accentBgActive: var(--cyan-5) !important;
+  --accentLine: var(--cyan-6) !important;
+  --accentBorder: var(--cyan-7) !important;
+  --accentBorderHover: var(--cyan-8) !important;
+  --accentSolid: var(--cyan-9) !important;
+  --accentSolidHover: var(--cyan-10) !important;
+  --accentText: var(--cyan-11) !important;
+  --accentTextContrast: var(--cyan-12) !important;
+}
+
+/* ============================================================
+   PROFUNDIDAD — sombras en cards, sidebar, header
+   ============================================================ */
+
+.dark [data-slot="card"],
+.dark .card,
+.dark [class*="rounded-lg"][class*="border"] {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4) !important;
+}
+
+:root:not(.dark) [data-slot="card"],
+:root:not(.dark) .card,
+:root:not(.dark) [class*="rounded-lg"][class*="border"] {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08) !important;
+}
+
+.dark [data-slot="sidebar"],
+.dark [data-sidebar="sidebar"] {
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.25) !important;
+}
+
+.dark header,
+.dark [data-slot="header"] {
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* ============================================================
+   FILAS ALTERNAS
+   ============================================================ */
+
+.dark tr:nth-child(even),
+.dark [role="row"]:nth-child(even) {
+  background-color: oklch(24% 0.004 240) !important;
+}
+
+:root:not(.dark) tr:nth-child(even),
+:root:not(.dark) [role="row"]:nth-child(even) {
+  background-color: oklch(93% 0.003 80) !important;
+}
+
+/* ============================================================
+   SIDEBAR WIDTH
+   ============================================================ */
+
+[data-slot="sidebar"],
+[data-sidebar="sidebar"] {
+  --sidebar-width: 240px;
+}
