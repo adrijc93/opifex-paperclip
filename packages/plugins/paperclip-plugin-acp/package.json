@@ -1,0 +1,21 @@
+{
+  "name": "paperclip-plugin-acp",
+  "version": "0.3.0-opifex.1",
+  "description": "ACP plugin for Paperclip - OPIFEX fork with patches for claude_local adapter",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "echo 'ACP plugin: dist files are the canonical source (JS ESM, no transpile needed)'"
+  },
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "workspace:*"
+  },
+  "opifex": {
+    "patches": [
+      "worker.js: companyId from rawEvent.companyId instead of payload",
+      "worker.js: Paperclip agent name -> CLI agent mapping with fallback to defaultAgent",
+      "worker.js: session.initialPrompt passthrough to spawnAgent",
+      "acp-spawn.js: --print --verbose -p <prompt> --output-format stream-json --permission-mode auto --allowedTools"
+    ]
+  }
+}
