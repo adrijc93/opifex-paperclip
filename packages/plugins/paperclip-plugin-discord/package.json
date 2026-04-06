@@ -1,0 +1,19 @@
+{
+  "name": "paperclip-plugin-discord",
+  "version": "0.4.5-opifex.1",
+  "description": "Discord plugin for Paperclip - OPIFEX fork with patches for multi-agent channel routing",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "echo 'Discord plugin: dist files are the canonical source (JS ESM, no transpile needed)'"
+  },
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "workspace:*"
+  },
+  "opifex": {
+    "patches": [
+      "session-registry.js: handleAcpOutput reads event.text instead of event.output",
+      "worker.js: resolveTopicChannel routes by assigneeAgentName in addition to project"
+    ]
+  }
+}
