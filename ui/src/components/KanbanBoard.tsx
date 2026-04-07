@@ -46,6 +46,7 @@ interface KanbanBoardProps {
   agents?: Agent[];
   liveIssueIds?: Set<string>;
   onUpdateIssue: (id: string, data: Record<string, unknown>) => void;
+  projectColorMap?: Map<string, string>;
 }
 
 /* ── Droppable Column ── */
@@ -55,11 +56,13 @@ function KanbanColumn({
   issues,
   agents,
   liveIssueIds,
+  projectColorMap,
 }: {
   status: string;
   issues: Issue[];
   agents?: Agent[];
   liveIssueIds?: Set<string>;
+  projectColorMap?: Map<string, string>;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
@@ -96,6 +99,7 @@ function KanbanColumn({
               issue={issue}
               agents={agents}
               isLive={liveIssueIds?.has(issue.id)}
+              projectColor={issue.projectId ? projectColorMap?.get(issue.projectId) : undefined}
             />
           ))}
         </SortableContext>
@@ -111,11 +115,13 @@ function KanbanCard({
   agents,
   isLive,
   isOverlay,
+  projectColor,
 }: {
   issue: Issue;
   agents?: Agent[];
   isLive?: boolean;
   isOverlay?: boolean;
+  projectColor?: string;
 }) {
   const {
     attributes,
@@ -139,7 +145,7 @@ function KanbanCard({
   return (
     <div
       ref={setNodeRef}
-      style={style}
+      style={{ ...style, ...(projectColor ? { borderColor: projectColor } : {}) }}
       {...attributes}
       {...listeners}
       className={`rounded-md border bg-card p-2.5 cursor-grab active:cursor-grabbing transition-shadow ${
@@ -192,6 +198,7 @@ export function KanbanBoard({
   agents,
   liveIssueIds,
   onUpdateIssue,
+  projectColorMap,
 }: KanbanBoardProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -268,12 +275,13 @@ export function KanbanBoard({
             issues={columnIssues[status] ?? []}
             agents={agents}
             liveIssueIds={liveIssueIds}
+            projectColorMap={projectColorMap}
           />
         ))}
       </div>
       <DragOverlay>
         {activeIssue ? (
-          <KanbanCard issue={activeIssue} agents={agents} isOverlay />
+          <KanbanCard issue={activeIssue} agents={agents} isOverlay projectColor={activeIssue.projectId ? projectColorMap?.get(activeIssue.projectId) : undefined} />
         ) : null}
       </DragOverlay>
     </DndContext>

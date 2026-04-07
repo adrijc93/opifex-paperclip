@@ -28,6 +28,7 @@ interface IssueRowProps {
   onArchive?: () => void;
   archiveDisabled?: boolean;
   className?: string;
+  projectColor?: string;
 }
 
 export function IssueRow({
@@ -46,6 +47,7 @@ export function IssueRow({
   onArchive,
   archiveDisabled,
   className,
+  projectColor,
 }: IssueRowProps) {
   const issuePathId = issue.identifier ?? issue.id;
   const identifier = issue.identifier ?? issue.id.slice(0, 8);
@@ -67,6 +69,7 @@ export function IssueRow({
         selected ? "hover:bg-transparent" : "hover:bg-accent/50",
         className,
       )}
+      style={projectColor ? { border: `1px solid ${projectColor}`, borderRadius: "6px", marginBottom: "2px" } : undefined}
     >
       <span className="shrink-0 pt-px sm:hidden">
         {mobileLeading ?? <StatusIcon status={issue.status} className={selectedStatusClass} />}

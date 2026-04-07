@@ -1158,6 +1158,7 @@ export function pluginRoutes(
 
     // Send initial comment to establish the connection
     res.write(":ok\n\n");
+    if (typeof (res as any).flush === "function") (res as any).flush();
 
     let unsubscribed = false;
     const safeUnsubscribe = () => {
@@ -1178,6 +1179,7 @@ export function pluginRoutes(
             res.write(`event: ${eventType}\n`);
           }
           res.write(`data: ${JSON.stringify(event)}\n\n`);
+          if (typeof (res as any).flush === "function") (res as any).flush();
         } catch {
           // Connection closed or write error — stop delivering
           safeUnsubscribe();
