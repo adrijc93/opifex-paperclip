@@ -45,6 +45,7 @@ import { createPluginEventBus } from "./services/plugin-event-bus.js";
 import { setPluginEventBus } from "./services/activity-log.js";
 import { createPluginDevWatcher } from "./services/plugin-dev-watcher.js";
 import { createPluginHostServiceCleanup } from "./services/plugin-host-service-cleanup.js";
+import { createPluginStreamBus } from "./services/plugin-stream-bus.js";
 import { pluginRegistryService } from "./services/plugin-registry.js";
 import { createHostClientHandlers } from "@paperclipai/plugin-sdk";
 import type { BetterAuthSessionResult } from "./auth/better-auth.js";
@@ -169,6 +170,7 @@ export async function createApp(
   api.use(instanceSettingsRoutes(db));
   const hostServicesDisposers = new Map<string, () => void>();
   const workerManager = createPluginWorkerManager();
+  const streamBus = createPluginStreamBus();
   const pluginRegistry = pluginRegistryService(db);
   const eventBus = createPluginEventBus();
   setPluginEventBus(eventBus);
@@ -201,6 +203,18 @@ export async function createApp(
       jobStore,
       toolDispatcher,
       lifecycleManager: lifecycle,
+      onStreamNotification: (pluginId, method, params) => {
+        const channel = String(params.channel ?? "");
+        const companyId = String(params.companyId ?? "");
+        if (!channel || !companyId) return;
+        if (method === "streams.emit") {
+          streamBus.publish(pluginId, channel, companyId, params.event);
+        } else if (method === "streams.open") {
+          streamBus.publish(pluginId, channel, companyId, null, "open");
+        } else if (method === "streams.close") {
+          streamBus.publish(pluginId, channel, companyId, null, "close");
+        }
+      },
       instanceInfo: {
         instanceId: opts.instanceId ?? "default",
         hostVersion: opts.hostVersion ?? "0.0.0",
@@ -227,7 +241,7 @@ export async function createApp(
       { scheduler, jobStore },
       { workerManager },
       { toolDispatcher },
-      { workerManager },
+      { workerManager, streamBus },
     ),
   );
   api.use(adapterRoutes());

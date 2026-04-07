@@ -229,6 +229,8 @@ export interface PluginRuntimeServices {
   toolDispatcher: PluginToolDispatcher;
   /** Lifecycle manager for state transitions and worker lifecycle events. */
   lifecycleManager: PluginLifecycleManager;
+  /** Optional callback for routing worker stream notifications to the stream bus. */
+  onStreamNotification?: (pluginId: string, method: string, params: Record<string, unknown>) => void;
   /**
    * Factory that creates worker-to-host RPC handlers for a given plugin.
    *
@@ -1732,6 +1734,9 @@ export function pluginLoader(
         apiVersion: manifest.apiVersion,
         hostHandlers,
         autoRestart: true,
+        onStreamNotification: runtimeServices.onStreamNotification
+          ? (method, params) => runtimeServices.onStreamNotification!(pluginId, method, params)
+          : undefined,
       };
 
       // Repo-local plugin installs can resolve workspace TS sources at runtime
