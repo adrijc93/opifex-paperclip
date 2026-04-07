@@ -159,6 +159,36 @@ A change is done when all are true:
 4. Docs updated when behavior or commands change
 5. PR description follows the [PR template](.github/PULL_REQUEST_TEMPLATE.md) with all sections filled in (including Model Used)
 
+## 12. Lecciones Aprendidas — Fork OPIFEX (2026-04-07)
+
+Errores detectados en sesión de revisión manual. Aplicar siempre antes de marcar done.
+
+### Checklist OBLIGATORIO antes de marcar done
+
+- [ ] `pnpm -r typecheck` pasa sin errores
+- [ ] `pnpm test:run` no rompe tests existentes
+- [ ] Si es UI: la página carga (HTTP 200 + sin JS errors en consola)
+- [ ] Si es plugin: `GET /api/plugins | jq '.[] | {pluginKey, status}'` → status=ready
+- [ ] Si añadiste un paquete al workspace: actualizar stage `deps` del Dockerfile
+- [ ] Si añadiste una ruta nueva al router: añadir su path root a `BOARD_ROUTE_ROOTS` en `ui/src/lib/company-routes.ts`
+- [ ] Commit + push + CI verde
+
+### Reglas derivadas
+
+1. **Tipos del SDK, no genéricos.** Usar `Issue`, `Agent`, `PluginEvent` de `@paperclipai/plugin-sdk` / `@paperclipai/shared`. Nunca `Record<string, unknown>` si existe el tipo correcto.
+
+2. **Dockerfile = workspace.** Cada paquete del workspace necesita `COPY pkg/package.json pkg/` en la stage `deps`. Si no está, `pnpm install --frozen-lockfile` falla en build.
+
+3. **Router: registrar rutas nuevas.** El wrapper de Paperclip usa `BOARD_ROUTE_ROOTS` para distinguir board routes de company prefixes. Un path root no registrado se interpreta como company prefix y rompe toda la app.
+
+4. **Plugins: buscar por `pluginId` Y `pluginKey`.** Las URLs usan el key (`paperclip-chat`), las APIs devuelven ambos. Siempre: `contributions.find((c) => c.pluginId === id || c.pluginKey === id)`.
+
+5. **SSE/streaming: cablear todo el stack.** Si un plugin usa `ctx.streams.emit()`, verificar que `streamBus` está creado en `app.ts`, pasado a `pluginRoutes()` como `bridgeDeps`, y cableado en `PluginRuntimeServices.onStreamNotification`.
+
+6. **Binarios: no hardcodear paths.** Usar `which` o el PATH del sistema. Si no es posible, crear symlink en el servidor.
+
+7. **Plugins: habilitar tras instalar.** Después de instalar un plugin verificar status y habilitar si está disabled: `POST /api/plugins/{pluginId}/enable`.
+
 ## 11. Fork-Specific: HenkDz/paperclip
 
 This is a fork of `paperclipai/paperclip` with QoL patches and an **external-only** Hermes adapter story on branch `feat/externalize-hermes-adapter` ([tree](https://github.com/HenkDz/paperclip/tree/feat/externalize-hermes-adapter)).

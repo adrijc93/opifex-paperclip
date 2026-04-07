@@ -206,6 +206,10 @@ export async function createApp(
       onStreamNotification: (pluginId, method, params) => {
         const channel = String(params.channel ?? "");
         const companyId = String(params.companyId ?? "");
+        logger.child({ service: "stream-bridge" }).info(
+          { pluginId, method, channel, companyId, hasEvent: !!params.event },
+          "stream notification received",
+        );
         if (!channel || !companyId) return;
         if (method === "streams.emit") {
           streamBus.publish(pluginId, channel, companyId, params.event);

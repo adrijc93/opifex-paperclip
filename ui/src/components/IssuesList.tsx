@@ -167,6 +167,7 @@ interface Agent {
 interface ProjectOption {
   id: string;
   name: string;
+  color?: string | null;
 }
 
 interface IssuesListProps {
@@ -206,6 +207,13 @@ export function IssuesList({
 }: IssuesListProps) {
   const { selectedCompanyId } = useCompany();
   const { openNewIssue } = useDialog();
+  const projectColorMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of projects ?? []) {
+      if (p.color) map.set(p.id, p.color);
+    }
+    return map;
+  }, [projects]);
   const { data: session } = useQuery({
     queryKey: queryKeys.auth.session,
     queryFn: () => authApi.getSession(),
@@ -657,6 +665,7 @@ export function IssuesList({
           agents={agents}
           liveIssueIds={liveIssueIds}
           onUpdateIssue={onUpdateIssue}
+          projectColorMap={projectColorMap}
         />
       ) : (
         groupedContent.map((group) => (
@@ -708,11 +717,13 @@ export function IssuesList({
                     });
                   };
 
+                  const projectColor = issue.projectId ? projectColorMap.get(issue.projectId) : undefined;
                   return (
                     <div key={issue.id} style={depth > 0 ? { paddingLeft: `${depth * 16}px` } : undefined}>
                       <IssueRow
                         issue={issue}
                         issueLinkState={issueLinkState}
+                        projectColor={projectColor}
                         titleSuffix={hasChildren && !isExpanded ? (
                           <span className="ml-1.5 text-xs text-muted-foreground">
                             ({totalDescendants} sub-task{totalDescendants !== 1 ? "s" : ""})
