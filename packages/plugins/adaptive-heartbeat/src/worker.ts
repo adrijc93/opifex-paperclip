@@ -45,8 +45,8 @@ const plugin = definePlugin({
     // ── Helper: count pending issues for an agent ────────────
     async function countBacklog(agentId: string, companyId: string): Promise<number> {
       try {
-        const all = await ctx.issues.list({ companyId, assigneeAgentId: agentId } as Record<string, unknown>);
-        return all.filter((i: Record<string, unknown>) =>
+        const all = await ctx.issues.list({ companyId, assigneeAgentId: agentId });
+        return all.filter((i) =>
           i.status === "todo" || i.status === "in_progress"
         ).length;
       } catch {
@@ -118,7 +118,7 @@ const plugin = definePlugin({
     async function getIssueAssignee(issueId: string, companyId: string): Promise<string | null> {
       try {
         const issue = await ctx.issues.get(issueId, companyId);
-        return (issue as Record<string, unknown>)?.assigneeAgentId as string ?? null;
+        return issue?.assigneeAgentId ?? null;
       } catch {
         return null;
       }
@@ -131,6 +131,7 @@ const plugin = definePlugin({
       if (!cfg.enabled) return;
 
       // Look up the issue to find the assignee (payload doesn't include it)
+      if (!event.entityId) return;
       const agentId = await getIssueAssignee(event.entityId, event.companyId);
       if (!agentId) return;
 
@@ -148,6 +149,7 @@ const plugin = definePlugin({
     ctx.events.on("issue.updated", async (event: PluginEvent) => {
       if (!cfg.enabled) return;
 
+      if (!event.entityId) return;
       const agentId = await getIssueAssignee(event.entityId, event.companyId);
       if (!agentId) return;
 
@@ -177,40 +179,38 @@ const plugin = definePlugin({
         const agentIssues = await ctx.issues.list({
           companyId: event.companyId,
           assigneeAgentId: agentId,
-        } as Record<string, unknown>);
+        });
 
         // Find issues this agent just completed that have a parent
         for (const issue of agentIssues) {
-          const iss = issue as Record<string, unknown>;
-          if (iss.status !== "done") continue;
-          const parentId = iss.parentId as string | undefined;
+          if (issue.status !== "done") continue;
+          const parentId = issue.parentId;
           if (!parentId) continue;
 
           // Check the parent
           try {
             const parent = await ctx.issues.get(parentId, event.companyId);
             if (!parent) continue;
-            const p = parent as Record<string, unknown>;
-            if (p.status !== "blocked") continue;
+            if (parent.status !== "blocked") continue;
 
             // Check all siblings (children of parent)
             const siblings = await ctx.issues.list({
               companyId: event.companyId,
-              parentId,
-            } as Record<string, unknown>);
-            const openSiblings = siblings.filter((s: Record<string, unknown>) =>
+            });
+            const children = siblings.filter((s) => s.parentId === parentId);
+            const openChildren = children.filter((s) =>
               s.status !== "done" && s.status !== "cancelled"
             );
 
-            if (openSiblings.length === 0) {
+            if (openChildren.length === 0) {
               // All subtasks done — unblock parent and invoke its assignee
               await ctx.issues.update(parentId, { status: "todo" }, event.companyId);
-              const parentAgentId = p.assigneeAgentId as string;
+              const parentAgentId = parent.assigneeAgentId;
               if (parentAgentId) {
                 const parentAgentName = await getAgentName(parentAgentId, event.companyId);
                 ctx.logger.info("Unblocked parent issue, invoking for synthesis", {
                   parentId,
-                  parentIdentifier: p.identifier,
+                  parentIdentifier: parent.identifier,
                   parentAgent: parentAgentName,
                 });
                 await tryInvoke(parentAgentId, event.companyId, parentAgentName, "subtasks complete → synthesis");
