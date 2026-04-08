@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
-import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, isNotNull, notInArray, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import type { BillingType, ExecutionWorkspace, ExecutionWorkspaceConfig } from "@paperclipai/shared";
 import {
@@ -378,6 +378,30 @@ function normalizeLedgerBillingType(value: unknown): BillingType {
 
 function resolveLedgerBiller(result: AdapterExecutionResult): string {
   return readNonEmptyString(result.biller) ?? readNonEmptyString(result.provider) ?? "unknown";
+}
+
+// Estimated API prices per million tokens (USD) for cost simulation
+// when running on subscription (no real billing). Updated 2026-04.
+const ESTIMATED_PRICES_PER_M: Record<string, { input: number; cachedInput: number; output: number }> = {
+  "claude-sonnet-4-6":  { input: 3,  cachedInput: 0.30, output: 15 },
+  "claude-opus-4-6":    { input: 15, cachedInput: 1.50, output: 75 },
+  "claude-haiku-4-5":   { input: 0.80, cachedInput: 0.08, output: 4 },
+  // fallback for unknown models
+  default:              { input: 3,  cachedInput: 0.30, output: 15 },
+};
+
+function estimateCostCents(
+  model: string,
+  inputTokens: number,
+  cachedInputTokens: number,
+  outputTokens: number,
+): number {
+  const prices = ESTIMATED_PRICES_PER_M[model] ?? ESTIMATED_PRICES_PER_M.default!;
+  const costUsd =
+    (inputTokens * prices.input / 1_000_000) +
+    (cachedInputTokens * prices.cachedInput / 1_000_000) +
+    (outputTokens * prices.output / 1_000_000);
+  return Math.max(0, Math.round(costUsd * 100));
 }
 
 function normalizeBilledCostCents(costUsd: number | null | undefined, billingType: BillingType): number {
@@ -2148,6 +2172,101 @@ export function heartbeatService(db: Db) {
     }
   }
 
+  // Reschedule wakeups for issues whose last run failed (e.g. due to transient API errors like
+  // 529 Overloaded) and that have no currently queued/running run. This prevents issues from
+  // being permanently orphaned in "todo" status after a transient adapter failure.
+  async function rescheduleOrphanedIssueAssignments(opts?: { minAgeMs?: number }) {
+    const minAgeMs = opts?.minAgeMs ?? 5 * 60 * 1000; // 5 minutes default
+    const cutoff = new Date(Date.now() - minAgeMs);
+    // Broader fallback: catch issues with no run history at all that have been stuck
+    // for longer (15 min) — e.g. when the initial wakeup was never created due to a
+    // crash/DB blip that happened before the wakeup could be persisted.
+    const noHistoryCutoff = new Date(Date.now() - 15 * 60 * 1000);
+
+    const staleExecutionRunCondition = sql`EXISTS (
+      SELECT 1 FROM heartbeat_runs stale_hr
+      WHERE stale_hr.id = ${issues.executionRunId}
+        AND stale_hr.status IN ('failed', 'cancelled', 'timed_out', 'succeeded')
+    )`;
+
+    const orphaned = await db
+      .select({
+        issueId: issues.id,
+        assigneeAgentId: issues.assigneeAgentId,
+      })
+      .from(issues)
+      .innerJoin(agents, and(
+        eq(agents.id, issues.assigneeAgentId!),
+        eq(agents.companyId, issues.companyId),
+      ))
+      .where(and(
+        inArray(issues.status, ["todo", "in_progress"]),
+        or(
+          isNull(issues.executionRunId),
+          // Also recover issues whose executionRunId points to a stale (completed/failed)
+          // run — this happens when releaseIssueExecutionAndPromote fails transiently
+          // (e.g. DB connection blip) and leaves a dangling pointer on the issue.
+          staleExecutionRunCondition,
+        ),
+        isNotNull(issues.assigneeAgentId),
+        notInArray(agents.status, ["paused", "terminated", "pending_approval"]),
+        // No currently active run for this issue (regardless of rescue path below)
+        sql`NOT EXISTS (
+          SELECT 1 FROM heartbeat_runs hr_active
+          WHERE hr_active.company_id = ${issues.companyId}
+            AND hr_active.context_snapshot ->> 'issueId' = ${issues.id}::text
+            AND hr_active.status IN ('queued', 'running')
+        )`,
+        or(
+          // Primary rescue: a prior run failed/timed_out and enough time has passed to retry
+          sql`EXISTS (
+            SELECT 1 FROM heartbeat_runs hr
+            WHERE hr.company_id = ${issues.companyId}
+              AND hr.context_snapshot ->> 'issueId' = ${issues.id}::text
+              AND hr.status IN ('failed', 'timed_out')
+              AND hr.finished_at < ${cutoff.toISOString()}
+          )`,
+          // Fallback rescue: no run history at all for this issue — wakeup was never
+          // persisted (e.g. DB timeout during initial queueIssueAssignmentWakeup) and
+          // no event-driven re-trigger ever recovered it.
+          and(
+            sql`NOT EXISTS (
+              SELECT 1 FROM heartbeat_runs hr_any
+              WHERE hr_any.company_id = ${issues.companyId}
+                AND hr_any.context_snapshot ->> 'issueId' = ${issues.id}::text
+            )`,
+            sql`${issues.updatedAt} < ${noHistoryCutoff.toISOString()}`,
+          ),
+        ),
+      ))
+      .limit(50);
+
+    if (orphaned.length > 0) {
+      logger.info({ count: orphaned.length, issueIds: orphaned.map((r) => r.issueId) }, "rescheduling orphaned issue assignments");
+    } else {
+      logger.debug("rescheduleOrphanedIssueAssignments: no orphaned issues found");
+    }
+
+    for (const row of orphaned) {
+      if (!row.assigneeAgentId) continue;
+      const result = await enqueueWakeup(row.assigneeAgentId, {
+        source: "automation",
+        triggerDetail: "system",
+        reason: "issue_assigned",
+        requestedByActorType: "system",
+        contextSnapshot: { issueId: row.issueId, source: "orphaned_issue_recovery" },
+      }).catch((err) => {
+        logger.warn({ err, issueId: row.issueId }, "failed to reschedule orphaned issue assignment");
+        return null;
+      });
+      if (result === null) {
+        logger.warn({ issueId: row.issueId, agentId: row.assigneeAgentId }, "orphaned issue rescheduling skipped or failed silently");
+      } else {
+        logger.info({ issueId: row.issueId, runId: typeof result === "object" && result !== null && "id" in result ? (result as { id: string }).id : undefined }, "orphaned issue rescheduled");
+      }
+    }
+  }
+
   async function updateRuntimeState(
     agent: typeof agents.$inferSelect,
     run: typeof heartbeatRuns.$inferSelect,
@@ -2161,8 +2280,12 @@ export function heartbeatService(db: Db) {
     const outputTokens = usage?.outputTokens ?? 0;
     const cachedInputTokens = usage?.cachedInputTokens ?? 0;
     const billingType = normalizeLedgerBillingType(result.billingType);
-    const additionalCostCents = normalizeBilledCostCents(result.costUsd, billingType);
+    let additionalCostCents = normalizeBilledCostCents(result.costUsd, billingType);
     const hasTokenUsage = inputTokens > 0 || outputTokens > 0 || cachedInputTokens > 0;
+    // Estimate cost from token usage when running on subscription (no real billing)
+    if (additionalCostCents === 0 && hasTokenUsage) {
+      additionalCostCents = estimateCostCents(result.model ?? "default", inputTokens, cachedInputTokens, outputTokens);
+    }
     const provider = result.provider ?? "unknown";
     const biller = resolveLedgerBiller(result);
     const ledgerScope = await resolveLedgerScopeForRun(db, agent.companyId, run);
@@ -4174,6 +4297,8 @@ export function heartbeatService(db: Db) {
     reapOrphanedRuns,
 
     resumeQueuedRuns,
+
+    rescheduleOrphanedIssueAssignments,
 
     tickTimers: async (now = new Date()) => {
       const allAgents = await db.select().from(agents);

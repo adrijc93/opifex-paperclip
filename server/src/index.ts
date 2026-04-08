@@ -609,13 +609,24 @@ export async function startServer(): Promise<StartedServer> {
           logger.error({ err }, "routine scheduler tick failed");
         });
   
-      // Periodically reap orphaned runs (5-min staleness threshold) and make sure
-      // persisted queued work is still being driven forward.
+      // Periodically reap orphaned runs (5-min staleness threshold) and resume persisted
+      // queued work. These run in sequence so reap clears stale runs before resume picks
+      // up new ones, but they are decoupled from the orphan reschedule below so a transient
+      // DB blip in reap does not silently skip the rescue.
       void heartbeat
         .reapOrphanedRuns({ staleThresholdMs: 5 * 60 * 1000 })
         .then(() => heartbeat.resumeQueuedRuns())
         .catch((err) => {
-          logger.error({ err }, "periodic heartbeat recovery failed");
+          logger.error({ err }, "periodic heartbeat recovery (reap/resume) failed");
+        });
+
+      // Reschedule issues whose last heartbeat run failed transiently (e.g. DB timeout,
+      // 529 Overloaded). This runs independently so a failure in reap/resume above does
+      // not silently prevent stuck issues from being retried.
+      void heartbeat
+        .rescheduleOrphanedIssueAssignments()
+        .catch((err) => {
+          logger.error({ err }, "periodic orphan issue reschedule failed");
         });
     }, config.heartbeatSchedulerIntervalMs);
   }
