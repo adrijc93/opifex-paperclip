@@ -20,6 +20,7 @@ const manifest = {
     "plugin.state.read",
     "plugin.state.write",
     "ui.sidebar.register",
+    "ui.action.register",
   ],
   entrypoints: {
     worker: "./dist/worker.js",
@@ -79,14 +80,13 @@ const manifest = {
       },
       {
         // Floating mic button — renders via DOM injection in useEffect.
-        // Uses toolbarButton slot so the component is mounted on issue pages
-        // (where chat lives). The component itself returns null; the actual
-        // button is a vanilla-DOM element positioned over the chat textarea.
-        type: "toolbarButton",
+        // Uses globalToolbarButton so the component is mounted on every page.
+        // The component returns null; buttons are vanilla-DOM elements
+        // injected over each visible textarea via MutationObserver.
+        type: "globalToolbarButton",
         id: "audio-chat-input",
         displayName: "Dictado por voz",
         exportName: "AudioChatInputButton",
-        entityTypes: ["issue"],
       },
     ],
   },
