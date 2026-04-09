@@ -15,7 +15,10 @@ export const DEFAULT_CONFIG = {
   defaultLanguage: "es-ES",
   voices: {},
   autoPlayTTS: false,
-  whisperModel: "base",
+  // SEC-217: tiny model = ~2.7s for 7s audio (CPU/FP32). base model = ~52s.
+  // Use tiny for Voice Chat Mode real-time responsiveness.
+  // Switch to small/medium/large only if GPU is available.
+  whisperModel: "tiny",
   elevenLabsApiKeyRef: "",
 };
 

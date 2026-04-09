@@ -52,7 +52,7 @@ const manifest = {
       whisperModel: {
         type: "string",
         title: "Modelo Whisper",
-        description: "Modelo Whisper local a usar: tiny, base, small, medium, large.",
+        description: "Modelo Whisper local a usar. 'tiny' recomendado para Voice Chat Mode (≈2.7s en CPU). 'base' y superiores requieren GPU para latencia aceptable (≈52s en CPU).",
         enum: ["tiny", "base", "small", "medium", "large"],
         default: DEFAULT_CONFIG.whisperModel,
       },
