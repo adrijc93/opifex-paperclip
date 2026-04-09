@@ -1,0 +1,13 @@
+{
+  "name": "paperclip-plugin-audio",
+  "version": "0.1.0-opifex.1",
+  "description": "Audio plugin for Paperclip OPIFEX fork — Whisper STT (Nivel 2) + ElevenLabs TTS",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "echo 'Audio plugin: dist files are the canonical source (JS ESM, no transpile needed)'"
+  },
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "workspace:*"
+  }
+}
