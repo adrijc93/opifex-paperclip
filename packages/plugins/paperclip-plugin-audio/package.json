@@ -7,7 +7,7 @@
   "scripts": {
     "build": "echo 'Audio plugin: dist files are the canonical source (JS ESM, no transpile needed)'"
   },
-  "dependencies": {
-    "@paperclipai/plugin-sdk": "workspace:*"
+  "peerDependencies": {
+    "@paperclipai/plugin-sdk": "*"
   }
 }
