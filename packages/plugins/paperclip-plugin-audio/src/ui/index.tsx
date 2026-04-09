@@ -505,9 +505,29 @@ function TtsSection({ workerAvailable }: { workerAvailable: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
-// AudioChatInputButton — slot: toolbarButton (entityTypes: issue)
-// SEC-211: renderiza null pero inyecta botón flotante sobre el chat textarea
+// AudioChatInputButton — slot: globalToolbarButton (SEC-212)
+// Monta globalmente en todas las páginas. Inyecta un botón mic en cada
+// textarea visible del DOM. Cada botón inyecta texto en su propio textarea.
 // ---------------------------------------------------------------------------
+
+function injectIntoTextarea(ta: HTMLTextAreaElement, text: string): void {
+  if (!text || !ta) return;
+  const current = ta.value;
+  const newValue = current
+    ? current.endsWith(" ") ? current + text : current + " " + text
+    : text;
+  try {
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+    if (nativeSetter) nativeSetter.call(ta, newValue);
+    else ta.value = newValue;
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    ta.dispatchEvent(new Event("change", { bubbles: true }));
+    ta.focus();
+    ta.setSelectionRange(newValue.length, newValue.length);
+  } catch {
+    ta.value = newValue;
+  }
+}
 
 export function AudioChatInputButton() {
   const configResult = usePluginData<{ defaultLanguage: string }>(DATA_KEYS.config);
@@ -520,14 +540,9 @@ export function AudioChatInputButton() {
       typeof (window as any).webkitSpeechRecognition !== "undefined";
     if (!supported) return;
 
-    let listening = false;
-    let recognition: any = null;
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.setAttribute("aria-label", "Dictado por voz (click para iniciar/detener)");
-    btn.title = "Dictado por voz";
-    btn.innerHTML =
+    const BTN_SIZE = 30;
+    const MARGIN = 6;
+    const MIC_SVG =
       '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
       '<path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>' +
       '<path d="M19 10v2a7 7 0 0 1-14 0v-2"/>' +
@@ -535,90 +550,124 @@ export function AudioChatInputButton() {
       '<line x1="8" y1="23" x2="16" y2="23"/>' +
       "</svg>";
 
-    const applyIdleStyle = () => {
+    const injected = new WeakSet<HTMLTextAreaElement>();
+    const containerMap = new Map<HTMLTextAreaElement, HTMLDivElement>();
+    let activeRecognition: any = null;
+    let activeContainer: HTMLDivElement | null = null;
+
+    const idleStyle = (btn: HTMLButtonElement) => {
       btn.style.cssText =
-        "width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;" +
+        `width:${BTN_SIZE}px;height:${BTN_SIZE}px;border-radius:50%;display:flex;align-items:center;justify-content:center;` +
         "cursor:pointer;border:1.5px solid rgba(255,255,255,0.18);background:rgba(30,30,40,0.85);" +
         "color:rgba(255,255,255,0.55);outline:none;padding:0;pointer-events:all;" +
-        "box-shadow:0 1px 4px rgba(0,0,0,0.3);";
+        "box-shadow:0 1px 4px rgba(0,0,0,0.3);transition:background 0.15s,border-color 0.15s,box-shadow 0.2s;";
     };
-    const applyRecordingStyle = () => {
+    const recordingStyle = (btn: HTMLButtonElement) => {
       btn.style.cssText =
-        "width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;" +
+        `width:${BTN_SIZE}px;height:${BTN_SIZE}px;border-radius:50%;display:flex;align-items:center;justify-content:center;` +
         "cursor:pointer;border:1.5px solid #ef4444;background:rgba(239,68,68,0.18);" +
         "color:#ef4444;outline:none;padding:0;pointer-events:all;" +
-        "box-shadow:0 0 0 3px rgba(239,68,68,0.22),0 1px 4px rgba(0,0,0,0.3);";
-    };
-    applyIdleStyle();
-
-    const stopListening = () => {
-      try { recognition?.stop(); } catch {}
-      recognition = null; listening = false; applyIdleStyle();
+        "box-shadow:0 0 0 3px rgba(239,68,68,0.22),0 1px 4px rgba(0,0,0,0.3);transition:background 0.15s,border-color 0.15s,box-shadow 0.2s;";
     };
 
-    const startListening = () => {
-      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      recognition = new SR();
-      recognition.lang = defaultLanguage;
-      recognition.interimResults = false;
-      recognition.continuous = false;
-      let finalText = "";
-
-      recognition.onresult = (ev: any) => {
-        for (let i = ev.resultIndex; i < ev.results.length; i++) {
-          if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript;
-        }
-      };
-      recognition.onend = () => {
-        listening = false; applyIdleStyle();
-        if (finalText.trim()) injectIntoChat(finalText.trim());
-        recognition = null;
-      };
-      recognition.onerror = (ev: any) => {
-        if (ev.error !== "no-speech") console.warn("[audio-plugin]", ev.error);
-        listening = false; applyIdleStyle(); recognition = null;
-      };
-
-      recognition.start(); listening = true; applyRecordingStyle();
+    const stopActiveRecognition = () => {
+      if (activeRecognition) { try { activeRecognition.stop(); } catch {} activeRecognition = null; }
+      if (activeContainer) { const b = activeContainer.firstElementChild as HTMLButtonElement | null; if (b) idleStyle(b); activeContainer = null; }
     };
 
-    btn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); listening ? stopListening() : startListening(); });
-    btn.addEventListener("contextmenu", (e) => e.preventDefault());
-    btn.addEventListener("touchstart", (e) => { e.preventDefault(); }, { passive: false });
-
-    const container = document.createElement("div");
-    container.id = "paperclip-audio-mic-float";
-    container.style.cssText = "position:fixed;z-index:9999;pointer-events:none;display:flex;align-items:center;justify-content:center;";
-    container.appendChild(btn);
-    document.body.appendChild(container);
-
-    const positionBtn = () => {
-      const ta = findChatTextarea();
-      if (!ta) { container.style.display = "none"; return; }
-      container.style.display = "flex";
+    const positionContainer = (ta: HTMLTextAreaElement, container: HTMLDivElement) => {
+      if (!ta.isConnected || ta.offsetParent === null) { container.style.display = "none"; return; }
       const rect = ta.getBoundingClientRect();
-      container.style.left = (rect.right - 30 - 6) + "px";
-      container.style.top = (rect.bottom - 30 - 6) + "px";
-      container.style.width = "30px";
-      container.style.height = "30px";
+      if (rect.width === 0 && rect.height === 0) { container.style.display = "none"; return; }
+      container.style.display = "flex";
+      container.style.left = rect.right - BTN_SIZE - MARGIN + "px";
+      container.style.top = rect.bottom - BTN_SIZE - MARGIN + "px";
+      container.style.width = BTN_SIZE + "px";
+      container.style.height = BTN_SIZE + "px";
     };
 
-    positionBtn();
-    window.addEventListener("resize", positionBtn);
-    const observer = new MutationObserver(positionBtn);
+    const addMicButton = (ta: HTMLTextAreaElement) => {
+      if (injected.has(ta)) return;
+      injected.add(ta);
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("aria-label", "Dictado por voz");
+      btn.title = "Dictado por voz";
+      btn.innerHTML = MIC_SVG;
+      idleStyle(btn);
+
+      const container = document.createElement("div") as HTMLDivElement;
+      container.className = "paperclip-audio-mic-float";
+      container.style.cssText =
+        "position:fixed;z-index:9999;pointer-events:none;display:none;" +
+        "align-items:center;justify-content:center;";
+      container.appendChild(btn);
+      document.body.appendChild(container);
+      containerMap.set(ta, container);
+
+      btn.addEventListener("click", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (activeRecognition && activeContainer === container) { stopActiveRecognition(); return; }
+        stopActiveRecognition();
+
+        const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        const recognition = new SR();
+        recognition.lang = defaultLanguage;
+        recognition.interimResults = false;
+        recognition.continuous = false;
+        let finalText = "";
+
+        recognition.onresult = (ev: any) => {
+          for (let i = ev.resultIndex; i < ev.results.length; i++) {
+            if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript;
+          }
+        };
+        recognition.onend = () => {
+          if (activeRecognition === recognition) { activeRecognition = null; activeContainer = null; }
+          idleStyle(btn);
+          if (finalText.trim()) injectIntoTextarea(ta, finalText.trim());
+        };
+        recognition.onerror = (ev: any) => {
+          if (ev.error !== "no-speech") console.warn("[audio-plugin]", ev.error);
+          if (activeRecognition === recognition) { activeRecognition = null; activeContainer = null; }
+          idleStyle(btn);
+        };
+
+        recognition.start(); activeRecognition = recognition; activeContainer = container;
+        recordingStyle(btn);
+      });
+      btn.addEventListener("contextmenu", (e) => e.preventDefault());
+      btn.addEventListener("touchstart", (e) => { e.preventDefault(); }, { passive: false });
+
+      positionContainer(ta, container);
+    };
+
+    const repositionAll = () => containerMap.forEach((container, ta) => positionContainer(ta, container));
+
+    const scanTextareas = () => {
+      document.querySelectorAll<HTMLTextAreaElement>("textarea").forEach((ta) => {
+        if (ta.offsetParent !== null) addMicButton(ta);
+      });
+      repositionAll();
+    };
+
+    scanTextareas();
+    window.addEventListener("resize", repositionAll);
+    const observer = new MutationObserver(scanTextareas);
     observer.observe(document.body, { childList: true, subtree: true, attributes: false });
-    const poll = setInterval(positionBtn, 1500);
+    const poll = setInterval(repositionAll, 1500);
 
     return () => {
       clearInterval(poll);
-      window.removeEventListener("resize", positionBtn);
+      window.removeEventListener("resize", repositionAll);
       observer.disconnect();
-      stopListening();
-      container.parentNode?.removeChild(container);
+      stopActiveRecognition();
+      containerMap.forEach((container) => container.parentNode?.removeChild(container));
     };
   }, [defaultLanguage]);
 
-  return null; // El componente no renderiza nada — el botón lo añade el useEffect
+  return null; // Buttons are injected as vanilla DOM elements via useEffect
 }
 
 // ---------------------------------------------------------------------------
