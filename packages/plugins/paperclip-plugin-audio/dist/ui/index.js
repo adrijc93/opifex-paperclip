@@ -162,7 +162,6 @@ function copyToClipboard(text) {
   if (navigator.clipboard?.writeText) {
     return navigator.clipboard.writeText(text);
   }
-  // Fallback
   const ta = document.createElement("textarea");
   ta.value = text;
   ta.style.position = "fixed";
@@ -190,20 +189,27 @@ function formatDuration(ms) {
   return `${m}:${String(s % 60).padStart(2, "0")}`;
 }
 
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      const base64 = result.split(",")[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 // ---------------------------------------------------------------------------
-// MicIcon SVG
+// Icons
 // ---------------------------------------------------------------------------
 
 function MicIcon({ size = 20, color = "currentColor" }) {
   return _jsx("svg", {
-    width: size,
-    height: size,
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: color,
-    strokeWidth: 2,
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
+    width: size, height: size, viewBox: "0 0 24 24", fill: "none",
+    stroke: color, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round",
     "aria-hidden": "true",
     children: _jsxs(_Fragment, {
       children: [
@@ -247,7 +253,7 @@ function CopyIcon({ size = 14 }) {
 }
 
 // ---------------------------------------------------------------------------
-// Level 1: MicButton — Web Speech API dictation
+// DictadoSection — Level 1: Web Speech API
 // ---------------------------------------------------------------------------
 
 function DictadoSection({ defaultLanguage }) {
@@ -268,8 +274,7 @@ function DictadoSection({ defaultLanguage }) {
       return;
     }
 
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognition.lang = defaultLanguage || "es-ES";
     recognition.interimResults = true;
@@ -282,27 +287,20 @@ function DictadoSection({ defaultLanguage }) {
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const chunk = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += chunk;
-        } else {
-          interim += chunk;
-        }
+        if (event.results[i].isFinal) finalTranscript += chunk;
+        else interim += chunk;
       }
       setTranscript(finalTranscript + interim);
     };
 
     recognition.onend = () => {
       setListening(false);
-      if (finalTranscript) {
-        setTranscript(finalTranscript);
-      }
+      if (finalTranscript) setTranscript(finalTranscript);
     };
 
     recognition.onerror = (event) => {
       setListening(false);
-      if (event.error !== "no-speech") {
-        setError(`Error: ${event.error}`);
-      }
+      if (event.error !== "no-speech") setError(`Error: ${event.error}`);
     };
 
     setError(null);
@@ -312,9 +310,7 @@ function DictadoSection({ defaultLanguage }) {
     setListening(true);
   }, [listening, supported, defaultLanguage]);
 
-  useEffect(() => {
-    return () => recognitionRef.current?.abort();
-  }, []);
+  useEffect(() => () => recognitionRef.current?.abort(), []);
 
   const handleCopy = async () => {
     if (!transcript) return;
@@ -332,10 +328,7 @@ function DictadoSection({ defaultLanguage }) {
       style: style.section,
       children: [
         _jsx("p", { style: style.sectionTitle, children: "Dictado por voz" }),
-        _jsx("p", {
-          style: { fontSize: 12, color: COLOR.textMuted, margin: 0 },
-          children: "Tu navegador no soporta Web Speech API. Usa Chrome o Edge.",
-        }),
+        _jsx("p", { style: { fontSize: 12, color: COLOR.textMuted, margin: 0 }, children: "Tu navegador no soporta Web Speech API. Usa Chrome o Edge." }),
       ],
     });
   }
@@ -352,16 +345,9 @@ function DictadoSection({ defaultLanguage }) {
             children: [
               _jsx("span", {
                 style: { fontSize: 12, color: COLOR.textMuted },
-                children: listening
-                  ? "Escuchando…"
-                  : transcript
-                  ? "Texto capturado"
-                  : `Idioma: ${defaultLanguage || "es-ES"}`,
+                children: listening ? "Escuchando…" : transcript ? "Texto capturado" : `Idioma: ${defaultLanguage || "es-ES"}`,
               }),
-              error && _jsx("span", {
-                style: { fontSize: 11, color: COLOR.danger },
-                children: error,
-              }),
+              error && _jsx("span", { style: { fontSize: 11, color: COLOR.danger }, children: error }),
             ],
           }),
           _jsx("button", {
@@ -371,49 +357,26 @@ function DictadoSection({ defaultLanguage }) {
               ...style.micCircle,
               background: listening ? COLOR.dangerLight : COLOR.bg,
               border: `2px solid ${listening ? COLOR.danger : COLOR.border}`,
-              boxShadow: listening
-                ? `0 0 0 4px rgba(239,68,68,0.15), 0 0 0 8px rgba(239,68,68,0.08)`
-                : "none",
-              animation: listening ? "pulse-ring 1.5s infinite" : "none",
+              boxShadow: listening ? `0 0 0 4px rgba(239,68,68,0.15), 0 0 0 8px rgba(239,68,68,0.08)` : "none",
             },
-            children: _jsx(MicIcon, {
-              size: 22,
-              color: listening ? COLOR.danger : COLOR.textMuted,
-            }),
+            children: _jsx(MicIcon, { size: 22, color: listening ? COLOR.danger : COLOR.textMuted }),
           }),
         ],
       }),
-      transcript && _jsx("textarea", {
-        style: style.textarea,
-        value: transcript,
-        readOnly: true,
-        "aria-label": "Texto transcrito",
-        rows: 3,
-      }),
+      transcript && _jsx("textarea", { style: style.textarea, value: transcript, readOnly: true, "aria-label": "Texto transcrito", rows: 3 }),
       transcript && _jsxs("div", {
         style: { ...style.row, justifyContent: "flex-end" },
         children: [
-          _jsxs("button", {
-            style: style.btn,
-            onClick: handleCopy,
-            title: "Copiar al portapapeles",
-            children: [
-              _jsx(CopyIcon, {}),
-              copied ? "¡Copiado!" : "Copiar",
-            ],
-          }),
+          _jsxs("button", { style: style.btn, onClick: handleCopy, title: "Copiar al portapapeles", children: [_jsx(CopyIcon, {}), copied ? "¡Copiado!" : "Copiar"] }),
         ],
       }),
-      !transcript && !listening && _jsx("p", {
-        style: { fontSize: 11, color: COLOR.textMuted, margin: 0, fontStyle: "italic" },
-        children: "Pulsa el micrófono y habla. El texto aparecerá aquí y puedes copiarlo al chat.",
-      }),
+      !transcript && !listening && _jsx("p", { style: { fontSize: 11, color: COLOR.textMuted, margin: 0, fontStyle: "italic" }, children: "Pulsa el micrófono y habla. El texto aparecerá aquí y puedes copiarlo al chat." }),
     ],
   });
 }
 
 // ---------------------------------------------------------------------------
-// Level 2: GrabacionSection — MediaRecorder + Whisper transcription
+// GrabacionSection — Level 2: MediaRecorder + Whisper
 // ---------------------------------------------------------------------------
 
 function GrabacionSection({ workerAvailable, defaultLanguage }) {
@@ -421,7 +384,7 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
 
   const [recording, setRecording] = useState(false);
   const [duration, setDuration] = useState(0);
-  const [status, setStatus] = useState(null); // "transcribing" | "done" | "error"
+  const [status, setStatus] = useState(null);
   const [transcript, setTranscript] = useState("");
   const [errorMsg, setErrorMsg] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -435,43 +398,32 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
 
   const startRecording = useCallback(async () => {
     if (!supported || recording) return;
-    setErrorMsg(null);
-    setTranscript("");
-    setStatus(null);
-    chunksRef.current = [];
+    setErrorMsg(null); setTranscript(""); setStatus(null); chunksRef.current = [];
 
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
+    } catch {
       setErrorMsg("Permiso de micrófono denegado. Permite el acceso en tu navegador.");
       return;
     }
 
     const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
-      : MediaRecorder.isTypeSupported("audio/webm")
-      ? "audio/webm"
-      : "audio/ogg";
+      : MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg";
 
     const recorder = new MediaRecorder(stream, { mimeType });
     mediaRecorderRef.current = recorder;
 
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
     recorder.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
-
       const blob = new Blob(chunksRef.current, { type: mimeType });
       const base64 = await blobToBase64(blob);
-
       setStatus("transcribing");
       try {
         const result = await transcribeAction({ audioBase64: base64, mimeType });
-        const text = result?.text ?? "";
-        setTranscript(text);
+        setTranscript(result?.text ?? "");
         setStatus("done");
       } catch (err) {
         setErrorMsg(err?.message ?? "Error al transcribir el audio");
@@ -479,41 +431,28 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
       }
     };
 
-    recorder.start(500); // collect chunks every 500ms
+    recorder.start(500);
     setRecording(true);
     startTimeRef.current = Date.now();
-
-    timerRef.current = setInterval(() => {
-      setDuration(Date.now() - startTimeRef.current);
-    }, 200);
+    timerRef.current = setInterval(() => setDuration(Date.now() - startTimeRef.current), 200);
   }, [supported, recording, transcribeAction]);
 
   const stopRecording = useCallback(() => {
     if (!recording) return;
     clearInterval(timerRef.current);
-    setRecording(false);
-    setDuration(0);
+    setRecording(false); setDuration(0);
     mediaRecorderRef.current?.stop();
   }, [recording]);
 
-  useEffect(() => {
-    return () => {
-      clearInterval(timerRef.current);
-      if (mediaRecorderRef.current?.state !== "inactive") {
-        mediaRecorderRef.current?.stop();
-      }
-    };
+  useEffect(() => () => {
+    clearInterval(timerRef.current);
+    if (mediaRecorderRef.current?.state !== "inactive") mediaRecorderRef.current?.stop();
   }, []);
 
   const handleCopy = async () => {
     if (!transcript) return;
-    try {
-      await copyToClipboard(transcript);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setErrorMsg("Error al copiar");
-    }
+    try { await copyToClipboard(transcript); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch { setErrorMsg("Error al copiar"); }
   };
 
   if (!supported) {
@@ -521,10 +460,7 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
       style: style.section,
       children: [
         _jsx("p", { style: style.sectionTitle, children: "Grabación (Nivel 2)" }),
-        _jsx("p", {
-          style: { fontSize: 12, color: COLOR.textMuted, margin: 0 },
-          children: "MediaRecorder no está disponible en este navegador.",
-        }),
+        _jsx("p", { style: { fontSize: 12, color: COLOR.textMuted, margin: 0 }, children: "MediaRecorder no está disponible en este navegador." }),
       ],
     });
   }
@@ -537,12 +473,7 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
         children: [
           _jsx("p", { style: style.sectionTitle, children: "Grabación de voz" }),
           !workerAvailable && _jsx("span", {
-            style: {
-              ...style.badge,
-              background: "rgba(245,158,11,0.15)",
-              color: COLOR.warning,
-              border: `1px solid rgba(245,158,11,0.3)`,
-            },
+            style: { ...style.badge, background: "rgba(245,158,11,0.15)", color: COLOR.warning, border: "1px solid rgba(245,158,11,0.3)" },
             children: "Worker pendiente",
           }),
         ],
@@ -552,14 +483,10 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
         children: [
           _jsx("span", {
             style: { fontSize: 12, color: recording ? COLOR.danger : COLOR.textMuted },
-            children: recording
-              ? `Grabando… ${formatDuration(duration)}`
-              : status === "transcribing"
-              ? "Transcribiendo con Whisper…"
-              : status === "done"
-              ? "Transcripción lista"
-              : status === "error"
-              ? "Error en transcripción"
+            children: recording ? `Grabando… ${formatDuration(duration)}`
+              : status === "transcribing" ? "Transcribiendo con Whisper…"
+              : status === "done" ? "Transcripción lista"
+              : status === "error" ? "Error en transcripción"
               : "Listo para grabar",
           }),
           _jsx("button", {
@@ -570,52 +497,33 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
               ...style.micCircle,
               background: recording ? COLOR.dangerLight : COLOR.bg,
               border: `2px solid ${recording ? COLOR.danger : COLOR.border}`,
-              boxShadow: recording
-                ? `0 0 0 4px rgba(239,68,68,0.15), 0 0 0 8px rgba(239,68,68,0.08)`
-                : "none",
+              boxShadow: recording ? `0 0 0 4px rgba(239,68,68,0.15), 0 0 0 8px rgba(239,68,68,0.08)` : "none",
               opacity: (!workerAvailable || status === "transcribing") ? 0.5 : 1,
             },
-            children: recording
-              ? _jsx(StopIcon, { size: 18 })
-              : _jsx(MicIcon, { size: 22, color: COLOR.textMuted }),
+            children: recording ? _jsx(StopIcon, { size: 18 }) : _jsx(MicIcon, { size: 22, color: COLOR.textMuted }),
           }),
         ],
       }),
-      errorMsg && _jsx("span", {
-        style: { fontSize: 11, color: COLOR.danger },
-        children: errorMsg,
-      }),
+      errorMsg && _jsx("span", { style: { fontSize: 11, color: COLOR.danger }, children: errorMsg }),
       transcript && _jsxs(_Fragment, {
         children: [
-          _jsx("textarea", {
-            style: style.textarea,
-            value: transcript,
-            readOnly: true,
-            rows: 3,
-            "aria-label": "Texto transcrito",
-          }),
+          _jsx("textarea", { style: style.textarea, value: transcript, readOnly: true, rows: 3, "aria-label": "Texto transcrito" }),
           _jsxs("div", {
             style: { ...style.row, justifyContent: "flex-end" },
-            children: [
-              _jsxs("button", {
-                style: style.btn,
-                onClick: handleCopy,
-                children: [_jsx(CopyIcon, {}), copied ? "¡Copiado!" : "Copiar"],
-              }),
-            ],
+            children: [_jsxs("button", { style: style.btn, onClick: handleCopy, children: [_jsx(CopyIcon, {}), copied ? "¡Copiado!" : "Copiar"] })],
           }),
         ],
       }),
       !workerAvailable && _jsx("p", {
         style: { fontSize: 11, color: COLOR.textMuted, margin: 0, fontStyle: "italic" },
-        children: "Requiere el worker de audio (SEC-202). Disponible cuando Forge complete la integración con Whisper.",
+        children: "Requiere el worker de audio ([SEC-202](/SEC/issues/SEC-202)). Disponible cuando Forge complete la integración con Whisper.",
       }),
     ],
   });
 }
 
 // ---------------------------------------------------------------------------
-// Level 2: TtsSection — ElevenLabs TTS playback
+// TtsSection — Level 2: ElevenLabs TTS
 // ---------------------------------------------------------------------------
 
 function TtsSection({ workerAvailable }) {
@@ -627,44 +535,28 @@ function TtsSection({ workerAvailable }) {
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
   const [autoPlay, setAutoPlay] = useState(() => {
-    try {
-      return localStorage.getItem(AUTOPLAY_KEY) === "true";
-    } catch {
-      return false;
-    }
+    try { return localStorage.getItem(AUTOPLAY_KEY) === "true"; } catch { return false; }
   });
   const [errorMsg, setErrorMsg] = useState(null);
   const audioRef = useRef(null);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(AUTOPLAY_KEY, String(autoPlay));
-    } catch {}
-  }, [autoPlay]);
-
-  useEffect(() => {
-    if (entityId) setAgentId(entityId);
-  }, [entityId]);
+  useEffect(() => { try { localStorage.setItem(AUTOPLAY_KEY, String(autoPlay)); } catch {} }, [autoPlay]);
+  useEffect(() => { if (entityId) setAgentId(entityId); }, [entityId]);
 
   const handlePlay = async () => {
     if (!text.trim() || !workerAvailable) return;
-    setErrorMsg(null);
-    setLoading(true);
+    setErrorMsg(null); setLoading(true);
     try {
       const result = await synthesizeAction({ text: text.trim(), agentId });
       const { audioBase64, mimeType: mime } = result ?? {};
       if (!audioBase64) throw new Error("No se recibió audio del servidor");
-
       const dataUrl = `data:${mime ?? "audio/mpeg"};base64,${audioBase64}`;
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.src = dataUrl;
         audioRef.current.onplay = () => setPlaying(true);
         audioRef.current.onended = () => setPlaying(false);
-        audioRef.current.onerror = () => {
-          setPlaying(false);
-          setErrorMsg("Error al reproducir el audio");
-        };
+        audioRef.current.onerror = () => { setPlaying(false); setErrorMsg("Error al reproducir el audio"); };
         await audioRef.current.play();
       }
     } catch (err) {
@@ -674,10 +566,7 @@ function TtsSection({ workerAvailable }) {
     }
   };
 
-  const handleStop = () => {
-    audioRef.current?.pause();
-    setPlaying(false);
-  };
+  const handleStop = () => { audioRef.current?.pause(); setPlaying(false); };
 
   return _jsxs("div", {
     style: style.section,
@@ -687,12 +576,7 @@ function TtsSection({ workerAvailable }) {
         children: [
           _jsx("p", { style: style.sectionTitle, children: "Text-to-Speech" }),
           !workerAvailable && _jsx("span", {
-            style: {
-              ...style.badge,
-              background: "rgba(245,158,11,0.15)",
-              color: COLOR.warning,
-              border: `1px solid rgba(245,158,11,0.3)`,
-            },
+            style: { ...style.badge, background: "rgba(245,158,11,0.15)", color: COLOR.warning, border: "1px solid rgba(245,158,11,0.3)" },
             children: "Worker pendiente",
           }),
         ],
@@ -712,72 +596,34 @@ function TtsSection({ workerAvailable }) {
           _jsxs("label", {
             style: { ...style.toggle, userSelect: "none" },
             children: [
-              _jsx("input", {
-                type: "checkbox",
-                checked: autoPlay,
-                onChange: (e) => setAutoPlay(e.target.checked),
-                style: { accentColor: COLOR.accent },
-                "aria-label": "Auto-reproducir respuestas",
-              }),
+              _jsx("input", { type: "checkbox", checked: autoPlay, onChange: (e) => setAutoPlay(e.target.checked), style: { accentColor: COLOR.accent }, "aria-label": "Auto-reproducir respuestas" }),
               "Auto-play",
             ],
           }),
           playing
-            ? _jsxs("button", {
-                style: { ...style.btn, ...style.btnDanger },
-                onClick: handleStop,
-                children: [_jsx(StopIcon, {}), "Detener"],
-              })
+            ? _jsxs("button", { style: { ...style.btn, ...style.btnDanger }, onClick: handleStop, children: [_jsx(StopIcon, {}), "Detener"] })
             : _jsxs("button", {
-                style: {
-                  ...style.btn,
-                  ...(workerAvailable && text.trim() ? style.btnPrimary : {}),
-                  opacity: (!workerAvailable || !text.trim() || loading) ? 0.5 : 1,
-                },
+                style: { ...style.btn, ...(workerAvailable && text.trim() ? style.btnPrimary : {}), opacity: (!workerAvailable || !text.trim() || loading) ? 0.5 : 1 },
                 onClick: handlePlay,
                 disabled: !workerAvailable || !text.trim() || loading,
-                children: [
-                  loading ? "Generando…" : _jsx(PlayIcon, {}),
-                  loading ? "" : "Reproducir",
-                ],
+                children: [loading ? "Generando…" : _jsx(PlayIcon, {}), loading ? "" : "Reproducir"],
               }),
         ],
       }),
-      errorMsg && _jsx("span", {
-        style: { fontSize: 11, color: COLOR.danger },
-        children: errorMsg,
-      }),
+      errorMsg && _jsx("span", { style: { fontSize: 11, color: COLOR.danger }, children: errorMsg }),
       _jsx("audio", { ref: audioRef, style: { display: "none" }, preload: "none" }),
     ],
   });
 }
 
 // ---------------------------------------------------------------------------
-// Helpers for recorder
-// ---------------------------------------------------------------------------
-
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result;
-      const base64 = result.split(",")[1];
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// AudioSidebarPanel — main slot component
+// AudioSidebarPanel — main slot
 // ---------------------------------------------------------------------------
 
 export function AudioSidebarPanel() {
   const configResult = usePluginData(DATA_KEYS.config);
   const config = configResult.data ?? {};
   const workerAvailable = !configResult.error;
-
   const defaultLanguage = config.defaultLanguage ?? "es-ES";
 
   return _jsxs("div", {
@@ -786,29 +632,10 @@ export function AudioSidebarPanel() {
       _jsxs("div", {
         style: { ...style.row, justifyContent: "space-between", marginBottom: 2 },
         children: [
-          _jsx("span", {
-            style: { fontSize: 13, fontWeight: 600, color: COLOR.text },
-            children: "Audio",
-          }),
+          _jsx("span", { style: { fontSize: 13, fontWeight: 600, color: COLOR.text }, children: "Audio" }),
           workerAvailable
-            ? _jsx("span", {
-                style: {
-                  ...style.badge,
-                  background: "rgba(34,197,94,0.12)",
-                  color: COLOR.success,
-                  border: `1px solid rgba(34,197,94,0.25)`,
-                },
-                children: "Worker activo",
-              })
-            : _jsx("span", {
-                style: {
-                  ...style.badge,
-                  background: "rgba(245,158,11,0.12)",
-                  color: COLOR.warning,
-                  border: `1px solid rgba(245,158,11,0.25)`,
-                },
-                children: "Solo Nivel 1",
-              }),
+            ? _jsx("span", { style: { ...style.badge, background: "rgba(34,197,94,0.12)", color: COLOR.success, border: "1px solid rgba(34,197,94,0.25)" }, children: "Worker activo" })
+            : _jsx("span", { style: { ...style.badge, background: "rgba(245,158,11,0.12)", color: COLOR.warning, border: "1px solid rgba(245,158,11,0.25)" }, children: "Solo Nivel 1" }),
         ],
       }),
       _jsx(DictadoSection, { defaultLanguage }),
@@ -825,29 +652,20 @@ export function AudioSidebarPanel() {
 export function AudioSidebarEntry({ context }) {
   const companyPrefix = context.companyPrefix ?? "";
   const panelPath = companyPrefix ? `/${companyPrefix}/settings/plugins` : "/settings/plugins";
-  const isActive = typeof window !== "undefined" &&
-    window.location.pathname.includes("audio");
+  const isActive = typeof window !== "undefined" && window.location.pathname.includes("audio");
 
   return _jsxs("a", {
     href: panelPath,
     title: "Panel de Audio",
     "aria-current": isActive ? "page" : undefined,
     style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 10,
-      padding: "8px 12px",
-      borderRadius: 6,
-      textDecoration: "none",
+      display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
+      borderRadius: 6, textDecoration: "none",
       color: isActive ? COLOR.text : COLOR.textMuted,
       background: isActive ? COLOR.bgHover : "transparent",
       transition: "background 0.15s, color 0.15s",
-      fontSize: 13,
-      fontWeight: 500,
+      fontSize: 13, fontWeight: 500,
     },
-    children: [
-      _jsx(MicIcon, { size: 16, color: "currentColor" }),
-      "Audio",
-    ],
+    children: [_jsx(MicIcon, { size: 16, color: "currentColor" }), "Audio"],
   });
 }
