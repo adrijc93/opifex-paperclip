@@ -1,5 +1,5 @@
 // Plugin Audio — UI
-// Fecha: 2026-04-09 | Issue: SEC-211 (fix UX: botón flotante + toggle)
+// Fecha: 2026-04-09 | Issue: SEC-215 (Modo 2 auto-send + Modo 3 Voice Chat Mode)
 // Estado: Listo para producción
 // Criterio de ejecución: se activa cuando el plugin audio está instalado en Paperclip
 
@@ -27,6 +27,7 @@ const DATA_KEYS = {
 };
 
 const AUTOPLAY_KEY = `${PLUGIN_ID}:autoPlayTTS`;
+const MODE_KEY = `${PLUGIN_ID}:mode`;
 
 // ---------------------------------------------------------------------------
 // Design tokens (dark UI, glassmorphism)
@@ -46,6 +47,8 @@ const COLOR = {
   dangerLight: "rgba(239,68,68,0.15)",
   success: "#22c55e",
   warning: "#f59e0b",
+  voiceChat: "rgba(124,58,237,0.15)",
+  voiceChatBorder: "rgba(124,58,237,0.35)",
 };
 
 const style = {
@@ -207,7 +210,6 @@ function blobToBase64(blob) {
 // ---------------------------------------------------------------------------
 
 function findChatTextarea() {
-  // Try specific selectors first, then fall back to last visible textarea
   const selectors = [
     'textarea[data-chat-input]',
     'textarea[data-testid="chat-input"]',
@@ -224,7 +226,6 @@ function findChatTextarea() {
   return all.reverse().find((el) => el.offsetParent !== null) ?? null;
 }
 
-// Inject transcribed text into a specific textarea element
 function injectIntoTextarea(ta, text) {
   if (!text || !ta) return;
   const current = ta.value;
@@ -248,22 +249,60 @@ function injectIntoChat(text) {
   if (!text) return;
   const ta = findChatTextarea();
   if (!ta) return;
-  const current = ta.value;
-  const newValue = current
-    ? current.endsWith(' ') ? current + text : current + ' ' + text
-    : text;
+  injectIntoTextarea(ta, text);
+}
+
+/**
+ * Inject text into the chat textarea and auto-submit via Ctrl+Enter.
+ * Returns true if text was sent, false if textarea not found.
+ */
+function sendChatMessage(text) {
+  if (!text) return false;
+  const ta = findChatTextarea();
+  if (!ta) return false;
+
+  // First clear any existing content, then set our text
   try {
-    // Use native setter to bypass React's synthetic event tracking
-    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-    if (nativeSetter) nativeSetter.call(ta, newValue);
-    else ta.value = newValue;
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-    ta.dispatchEvent(new Event('change', { bubbles: true }));
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+    if (nativeSetter) nativeSetter.call(ta, text);
+    else ta.value = text;
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    ta.dispatchEvent(new Event("change", { bubbles: true }));
     ta.focus();
-    ta.setSelectionRange(newValue.length, newValue.length);
+    ta.setSelectionRange(text.length, text.length);
   } catch {
-    ta.value = newValue;
+    ta.value = text;
   }
+
+  // Trigger Ctrl+Enter (Paperclip's submit shortcut: e.metaKey || e.ctrlKey)
+  setTimeout(() => {
+    ta.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter",
+      code: "Enter",
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+    }));
+  }, 50);
+
+  return true;
+}
+
+/**
+ * Find the last agent/assistant message text in the DOM.
+ * Uses .paperclip-markdown as the stable selector for MarkdownBody content.
+ */
+function findLastAgentMessageText() {
+  // paperclip-markdown is the class used by MarkdownBody for all prose content
+  const elements = document.querySelectorAll(".paperclip-markdown");
+  if (!elements.length) return null;
+
+  // Get the last one (most recent message)
+  const last = elements[elements.length - 1];
+  const text = last.textContent?.trim() ?? "";
+  // Filter out very short strings (headers, labels, etc.)
+  if (text.length < 20) return null;
+  return text;
 }
 
 // ---------------------------------------------------------------------------
@@ -316,14 +355,79 @@ function CopyIcon({ size = 14 }) {
   });
 }
 
+function WaveIcon({ size = 24, active = false }) {
+  return _jsxs("svg", {
+    width: size, height: size, viewBox: "0 0 24 24", fill: "none",
+    stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round",
+    "aria-hidden": "true",
+    children: [
+      _jsx("line", { x1: "2", y1: "12", x2: "2", y2: "12", style: { animation: active ? "wave1 0.6s ease-in-out infinite" : "none" } }),
+      _jsx("line", { x1: "6", y1: "8", x2: "6", y2: "16", style: { animation: active ? "wave2 0.6s ease-in-out infinite 0.1s" : "none" } }),
+      _jsx("line", { x1: "10", y1: "5", x2: "10", y2: "19", style: { animation: active ? "wave1 0.6s ease-in-out infinite 0.2s" : "none" } }),
+      _jsx("line", { x1: "14", y1: "8", x2: "14", y2: "16", style: { animation: active ? "wave2 0.6s ease-in-out infinite 0.15s" : "none" } }),
+      _jsx("line", { x1: "18", y1: "10", x2: "18", y2: "14", style: { animation: active ? "wave1 0.6s ease-in-out infinite 0.05s" : "none" } }),
+      _jsx("line", { x1: "22", y1: "12", x2: "22", y2: "12", style: { animation: active ? "wave2 0.6s ease-in-out infinite 0.25s" : "none" } }),
+    ],
+  });
+}
+
 // ---------------------------------------------------------------------------
-// DictadoSection — Level 1: Web Speech API
+// ModeSelector — tabs for Modo 1 / 2 / 3
+// ---------------------------------------------------------------------------
+
+const MODE_LABELS = {
+  1: "Dictado",
+  2: "Nota + auto-send",
+  3: "Voice Chat",
+};
+
+function ModeSelector({ mode, onChange }) {
+  return _jsxs("div", {
+    style: {
+      display: "flex",
+      gap: 4,
+      background: "rgba(255,255,255,0.04)",
+      border: `1px solid ${COLOR.border}`,
+      borderRadius: 8,
+      padding: 4,
+    },
+    "aria-label": "Seleccionar modo",
+    children: [1, 2, 3].map((m) =>
+      _jsx("button", {
+        key: m,
+        onClick: () => onChange(m),
+        type: "button",
+        "aria-pressed": mode === m,
+        style: {
+          flex: 1,
+          padding: "5px 4px",
+          borderRadius: 5,
+          border: "none",
+          background: mode === m ? (m === 3 ? COLOR.accent : "rgba(255,255,255,0.10)") : "transparent",
+          color: mode === m ? "#fff" : COLOR.textMuted,
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.03em",
+          cursor: "pointer",
+          transition: "all 0.15s",
+          outline: "none",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        },
+        children: `M${m}: ${MODE_LABELS[m]}`,
+      })
+    ),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// DictadoSection — Mode 1: Web Speech API
 // ---------------------------------------------------------------------------
 
 function DictadoSection({ defaultLanguage }) {
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState(null);
   const recognitionRef = useRef(null);
 
@@ -361,7 +465,6 @@ function DictadoSection({ defaultLanguage }) {
       setListening(false);
       if (finalTranscript) {
         setTranscript(finalTranscript);
-        // Inyectar directamente al textarea del chat
         injectIntoChat(finalTranscript);
       }
     };
@@ -429,10 +532,10 @@ function DictadoSection({ defaultLanguage }) {
 }
 
 // ---------------------------------------------------------------------------
-// GrabacionSection — Level 2: MediaRecorder + Whisper
+// GrabacionSection — Mode 2: MediaRecorder + Whisper (+ auto-send)
 // ---------------------------------------------------------------------------
 
-function GrabacionSection({ workerAvailable, defaultLanguage }) {
+function GrabacionSection({ workerAvailable, defaultLanguage, autoSend = false }) {
   const transcribeAction = usePluginAction(ACTION_KEYS.transcribeAudio);
 
   const [recording, setRecording] = useState(false);
@@ -441,6 +544,7 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
   const [transcript, setTranscript] = useState("");
   const [errorMsg, setErrorMsg] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [sent, setSent] = useState(false);
 
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -451,7 +555,7 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
 
   const startRecording = useCallback(async () => {
     if (!supported || recording) return;
-    setErrorMsg(null); setTranscript(""); setStatus(null); chunksRef.current = [];
+    setErrorMsg(null); setTranscript(""); setStatus(null); setSent(false); chunksRef.current = [];
 
     let stream;
     try {
@@ -476,8 +580,15 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
       setStatus("transcribing");
       try {
         const result = await transcribeAction({ audioBase64: base64, mimeType });
-        setTranscript(result?.text ?? "");
+        const text = result?.text ?? "";
+        setTranscript(text);
         setStatus("done");
+        if (autoSend && text.trim()) {
+          const ok = sendChatMessage(text.trim());
+          setSent(ok);
+        } else if (text.trim()) {
+          injectIntoChat(text.trim());
+        }
       } catch (err) {
         setErrorMsg(err?.message ?? "Error al transcribir el audio");
         setStatus("error");
@@ -488,7 +599,7 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
     setRecording(true);
     startTimeRef.current = Date.now();
     timerRef.current = setInterval(() => setDuration(Date.now() - startTimeRef.current), 200);
-  }, [supported, recording, transcribeAction]);
+  }, [supported, recording, transcribeAction, autoSend]);
 
   const stopRecording = useCallback(() => {
     if (!recording) return;
@@ -512,11 +623,18 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
     return _jsxs("div", {
       style: style.section,
       children: [
-        _jsx("p", { style: style.sectionTitle, children: "Grabación (Nivel 2)" }),
+        _jsx("p", { style: style.sectionTitle, children: "Grabación de voz" }),
         _jsx("p", { style: { fontSize: 12, color: COLOR.textMuted, margin: 0 }, children: "MediaRecorder no está disponible en este navegador." }),
       ],
     });
   }
+
+  const statusText = recording ? `Grabando… ${formatDuration(duration)}`
+    : status === "transcribing" ? "Transcribiendo con Whisper…"
+    : status === "done" && sent ? "✓ Mensaje enviado"
+    : status === "done" ? "✓ Transcripción lista"
+    : status === "error" ? "Error en transcripción"
+    : "Listo para grabar";
 
   return _jsxs("div", {
     style: style.section,
@@ -524,10 +642,14 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
       _jsxs("div", {
         style: { ...style.row, justifyContent: "space-between" },
         children: [
-          _jsx("p", { style: style.sectionTitle, children: "Grabación de voz" }),
+          _jsx("p", { style: style.sectionTitle, children: autoSend ? "Nota de voz (auto-send)" : "Grabación de voz" }),
           !workerAvailable && _jsx("span", {
             style: { ...style.badge, background: "rgba(245,158,11,0.15)", color: COLOR.warning, border: "1px solid rgba(245,158,11,0.3)" },
             children: "Worker pendiente",
+          }),
+          autoSend && workerAvailable && _jsx("span", {
+            style: { ...style.badge, background: "rgba(124,58,237,0.15)", color: COLOR.accent, border: "1px solid rgba(124,58,237,0.3)" },
+            children: "Auto-send",
           }),
         ],
       }),
@@ -535,12 +657,8 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
         style: { ...style.row, justifyContent: "space-between" },
         children: [
           _jsx("span", {
-            style: { fontSize: 12, color: recording ? COLOR.danger : COLOR.textMuted },
-            children: recording ? `Grabando… ${formatDuration(duration)}`
-              : status === "transcribing" ? "Transcribiendo con Whisper…"
-              : status === "done" ? "Transcripción lista"
-              : status === "error" ? "Error en transcripción"
-              : "Listo para grabar",
+            style: { fontSize: 12, color: recording ? COLOR.danger : (status === "done" ? COLOR.success : COLOR.textMuted) },
+            children: statusText,
           }),
           _jsx("button", {
             onClick: recording ? stopRecording : startRecording,
@@ -558,7 +676,7 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
         ],
       }),
       errorMsg && _jsx("span", { style: { fontSize: 11, color: COLOR.danger }, children: errorMsg }),
-      transcript && _jsxs(_Fragment, {
+      transcript && !autoSend && _jsxs(_Fragment, {
         children: [
           _jsx("textarea", { style: style.textarea, value: transcript, readOnly: true, rows: 3, "aria-label": "Texto transcrito" }),
           _jsxs("div", {
@@ -567,9 +685,13 @@ function GrabacionSection({ workerAvailable, defaultLanguage }) {
           }),
         ],
       }),
+      autoSend && transcript && _jsx("p", {
+        style: { fontSize: 11, color: COLOR.textMuted, margin: 0, fontStyle: "italic" },
+        children: `Transcrito: "${transcript.substring(0, 60)}${transcript.length > 60 ? "…" : ""}"`,
+      }),
       !workerAvailable && _jsx("p", {
         style: { fontSize: 11, color: COLOR.textMuted, margin: 0, fontStyle: "italic" },
-        children: "Requiere el worker de audio ([SEC-202](/SEC/issues/SEC-202)). Disponible cuando Forge complete la integración con Whisper.",
+        children: "Requiere el worker de audio. Disponible cuando Forge complete la integración con Whisper.",
       }),
     ],
   });
@@ -670,9 +792,331 @@ function TtsSection({ workerAvailable }) {
 }
 
 // ---------------------------------------------------------------------------
+// VoiceChatMode — Mode 3: full hands-free conversation
+// States: idle → recording → processing → waiting → speaking → idle
+// ---------------------------------------------------------------------------
+
+// State indicators
+const VC_STATE_CONFIG = {
+  idle:       { label: "Listo — mantén pulsado para hablar", color: COLOR.textMuted, ring: COLOR.border },
+  recording:  { label: "Grabando…",                         color: COLOR.danger,     ring: COLOR.danger },
+  processing: { label: "Procesando…",                       color: COLOR.warning,    ring: COLOR.warning },
+  waiting:    { label: "Esperando respuesta…",              color: COLOR.accent,     ring: COLOR.accent },
+  speaking:   { label: "Reproduciendo respuesta…",          color: COLOR.success,    ring: COLOR.success },
+};
+
+function VoiceChatMode({ workerAvailable, defaultLanguage, agentId, onExit }) {
+  const transcribeAction = usePluginAction(ACTION_KEYS.transcribeAudio);
+  const synthesizeAction = usePluginAction(ACTION_KEYS.synthesizeSpeech);
+
+  const [vcState, setVcState] = useState("idle");
+  const [errorMsg, setErrorMsg] = useState(null);
+  const [lastSent, setLastSent] = useState("");
+  const [lastResponse, setLastResponse] = useState("");
+
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const audioRef = useRef(null);
+  const holdingRef = useRef(false);
+  const sentAtRef = useRef(null);
+  const observerRef = useRef(null);
+  const responseTimeoutRef = useRef(null);
+  const streamRef = useRef(null);
+
+  // Auto-play TTS when agent responds — DOM observation via .paperclip-markdown
+  const startWaitingForResponse = useCallback((sentText) => {
+    setVcState("waiting");
+    sentAtRef.current = Date.now();
+
+    // Snapshot of existing .paperclip-markdown nodes before the response arrives
+    const existingNodes = new Set(Array.from(document.querySelectorAll(".paperclip-markdown")));
+
+    const synthesize = async (text) => {
+      if (!text || !workerAvailable) { setVcState("idle"); return; }
+      setVcState("speaking");
+      setLastResponse(text);
+      try {
+        const result = await synthesizeAction({ text: text.substring(0, 500), agentId });
+        const { audioBase64, mimeType: mime } = result ?? {};
+        if (!audioBase64) { setVcState("idle"); return; }
+        const dataUrl = `data:${mime ?? "audio/mpeg"};base64,${audioBase64}`;
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.src = dataUrl;
+          audioRef.current.onended = () => setVcState("idle");
+          audioRef.current.onerror = () => setVcState("idle");
+          await audioRef.current.play();
+        }
+      } catch {
+        setVcState("idle");
+      }
+    };
+
+    // MutationObserver: watch for new .paperclip-markdown nodes
+    const observer = new MutationObserver(() => {
+      const allNodes = document.querySelectorAll(".paperclip-markdown");
+      for (const node of allNodes) {
+        if (!existingNodes.has(node)) {
+          const text = node.textContent?.trim() ?? "";
+          if (text.length >= 20) {
+            // Found new agent response — wait a bit for it to finish streaming
+            clearTimeout(responseTimeoutRef.current);
+            responseTimeoutRef.current = setTimeout(() => {
+              // Re-read text after brief delay (streaming may have added more)
+              const finalText = node.textContent?.trim() ?? "";
+              if (finalText.length >= 20) {
+                observer.disconnect();
+                observerRef.current = null;
+                synthesize(finalText);
+              }
+            }, 1500);
+          }
+        }
+      }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    observerRef.current = observer;
+
+    // Timeout after 30s — give up waiting
+    responseTimeoutRef.current = setTimeout(() => {
+      observer.disconnect();
+      observerRef.current = null;
+      setVcState("idle");
+    }, 30000);
+  }, [workerAvailable, agentId, synthesizeAction]);
+
+  const stopObserver = useCallback(() => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+    clearTimeout(responseTimeoutRef.current);
+  }, []);
+
+  // Hold-to-talk: start recording on pointerdown
+  const handlePointerDown = useCallback(async (e) => {
+    if (e.button !== undefined && e.button !== 0) return; // left click / touch only
+    if (vcState !== "idle") return;
+    e.preventDefault();
+    holdingRef.current = true;
+    setErrorMsg(null);
+
+    if (!workerAvailable) {
+      setErrorMsg("Worker de audio no disponible.");
+      return;
+    }
+
+    chunksRef.current = [];
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+    } catch {
+      setErrorMsg("Permiso de micrófono denegado.");
+      return;
+    }
+
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg";
+
+    const recorder = new MediaRecorder(stream, { mimeType });
+    mediaRecorderRef.current = recorder;
+    recorder.ondataavailable = (ev) => { if (ev.data.size > 0) chunksRef.current.push(ev.data); };
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      if (!holdingRef.current && chunksRef.current.length === 0) { setVcState("idle"); return; }
+      const blob = new Blob(chunksRef.current, { type: mimeType });
+      const base64 = await blobToBase64(blob);
+      setVcState("processing");
+      try {
+        const result = await transcribeAction({ audioBase64: base64, mimeType });
+        const text = result?.text?.trim() ?? "";
+        if (text) {
+          setLastSent(text);
+          const ok = sendChatMessage(text);
+          if (ok) {
+            startWaitingForResponse(text);
+          } else {
+            setVcState("idle");
+            setErrorMsg("No se encontró el chat. Abre una conversación.");
+          }
+        } else {
+          setVcState("idle");
+        }
+      } catch (err) {
+        setErrorMsg(err?.message ?? "Error al transcribir");
+        setVcState("idle");
+      }
+    };
+
+    recorder.start(300);
+    setVcState("recording");
+  }, [vcState, workerAvailable, transcribeAction, startWaitingForResponse]);
+
+  // Release: stop recording
+  const handlePointerUp = useCallback(() => {
+    if (!holdingRef.current) return;
+    holdingRef.current = false;
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => () => {
+    stopObserver();
+    audioRef.current?.pause();
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+  }, [stopObserver]);
+
+  // Add global pointerup to handle releases outside the button
+  useEffect(() => {
+    const up = () => handlePointerUp();
+    window.addEventListener("pointerup", up);
+    return () => window.removeEventListener("pointerup", up);
+  }, [handlePointerUp]);
+
+  const cfg = VC_STATE_CONFIG[vcState] ?? VC_STATE_CONFIG.idle;
+  const isActive = vcState !== "idle";
+  const bigBtnSize = 80;
+
+  return _jsxs("div", {
+    style: {
+      ...style.section,
+      background: `rgba(124,58,237,0.06)`,
+      border: `1px solid ${COLOR.voiceChatBorder}`,
+      gap: 12,
+    },
+    children: [
+      // Header
+      _jsxs("div", {
+        style: { ...style.row, justifyContent: "space-between" },
+        children: [
+          _jsx("p", { style: { ...style.sectionTitle, color: COLOR.accent }, children: "Voice Chat Mode" }),
+          _jsx("button", {
+            onClick: () => {
+              stopObserver();
+              audioRef.current?.pause();
+              streamRef.current?.getTracks().forEach((t) => t.stop());
+              if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop();
+              onExit();
+            },
+            type: "button",
+            style: { ...style.btn, fontSize: 11, padding: "4px 10px" },
+            children: "✕ Salir",
+          }),
+        ],
+      }),
+
+      // State indicator
+      _jsx("div", {
+        style: {
+          textAlign: "center",
+          fontSize: 12,
+          color: cfg.color,
+          fontWeight: 500,
+          minHeight: 18,
+          transition: "color 0.2s",
+        },
+        "aria-live": "polite",
+        children: cfg.label,
+      }),
+
+      // Big hold-to-talk button
+      _jsx("div", {
+        style: { display: "flex", justifyContent: "center", padding: "4px 0" },
+        children: _jsx("button", {
+          onPointerDown: handlePointerDown,
+          onPointerUp: handlePointerUp,
+          onContextMenu: (e) => e.preventDefault(),
+          disabled: vcState === "processing" || vcState === "waiting" || vcState === "speaking",
+          type: "button",
+          "aria-label": vcState === "recording" ? "Suelta para enviar" : "Mantén pulsado para hablar",
+          style: {
+            width: bigBtnSize,
+            height: bigBtnSize,
+            borderRadius: "50%",
+            border: `2px solid ${cfg.ring}`,
+            background: vcState === "recording"
+              ? COLOR.dangerLight
+              : vcState === "speaking"
+              ? "rgba(34,197,94,0.12)"
+              : vcState === "processing" || vcState === "waiting"
+              ? "rgba(124,58,237,0.12)"
+              : COLOR.bg,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: (vcState === "processing" || vcState === "waiting" || vcState === "speaking") ? "default" : "pointer",
+            outline: "none",
+            boxShadow: vcState === "recording"
+              ? `0 0 0 6px rgba(239,68,68,0.15), 0 0 0 12px rgba(239,68,68,0.07)`
+              : vcState === "speaking"
+              ? `0 0 0 6px rgba(34,197,94,0.12)`
+              : "none",
+            transition: "all 0.2s",
+            opacity: (vcState === "processing" || vcState === "waiting") ? 0.7 : 1,
+          },
+          children: vcState === "recording"
+            ? _jsx(StopIcon, { size: 28 })
+            : vcState === "speaking"
+            ? _jsx(WaveIcon, { size: 28, active: true })
+            : _jsx(MicIcon, { size: 32, color: vcState === "idle" ? COLOR.textMuted : cfg.color }),
+        }),
+      }),
+
+      // Hint
+      _jsx("p", {
+        style: { fontSize: 11, color: COLOR.textMuted, margin: 0, textAlign: "center", fontStyle: "italic" },
+        children: vcState === "idle"
+          ? "Mantén pulsado el botón para grabar. Suelta para enviar."
+          : vcState === "recording"
+          ? "Suelta para enviar…"
+          : vcState === "processing"
+          ? "Transcribiendo y enviando…"
+          : vcState === "waiting"
+          ? "El agente está respondiendo…"
+          : "Reproduciéndose la respuesta…",
+      }),
+
+      // Last exchange (debug/info)
+      (lastSent || lastResponse) && _jsxs("div", {
+        style: { borderTop: `1px solid ${COLOR.border}`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 4 },
+        children: [
+          lastSent && _jsxs("div", {
+            style: { fontSize: 11, color: COLOR.textMuted },
+            children: [
+              _jsx("span", { style: { fontWeight: 600 }, children: "Tú: " }),
+              `"${lastSent.substring(0, 80)}${lastSent.length > 80 ? "…" : ""}"`,
+            ],
+          }),
+          lastResponse && _jsxs("div", {
+            style: { fontSize: 11, color: COLOR.textMuted },
+            children: [
+              _jsx("span", { style: { fontWeight: 600 }, children: "Agente: " }),
+              `"${lastResponse.substring(0, 80)}${lastResponse.length > 80 ? "…" : ""}"`,
+            ],
+          }),
+        ],
+      }),
+
+      errorMsg && _jsx("span", { style: { fontSize: 11, color: COLOR.danger }, children: errorMsg }),
+
+      !workerAvailable && _jsx("p", {
+        style: { fontSize: 11, color: COLOR.warning, margin: 0 },
+        children: "Worker de audio no disponible. Voice Chat requiere Whisper + TTS.",
+      }),
+
+      _jsx("audio", { ref: audioRef, style: { display: "none" }, preload: "none" }),
+    ],
+  });
+}
+
+// ---------------------------------------------------------------------------
 // AudioChatInputButton — floating mic button injected on EVERY visible textarea
 // Slot: globalToolbarButton — mounts globally on every page (SEC-212 fix)
-// Each textarea gets its own button; clicking injects text into that textarea.
 // ---------------------------------------------------------------------------
 
 export function AudioChatInputButton() {
@@ -696,11 +1140,8 @@ export function AudioChatInputButton() {
       '<line x1="8" y1="23" x2="16" y2="23"/>' +
       "</svg>";
 
-    // Track injected textareas (WeakSet for GC-friendly "seen?" check)
     const injected = new WeakSet();
-    // Map textarea → container div (needed for repositioning and cleanup)
     const containerMap = new Map();
-    // One active recognition at a time across all buttons
     let activeRecognition = null;
     let activeContainer = null;
 
@@ -769,12 +1210,10 @@ export function AudioChatInputButton() {
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        // Toggle: if this button is already recording, stop it
         if (activeRecognition && activeContainer === container) {
           stopActiveRecognition();
           return;
         }
-        // Stop any other active recognition first
         stopActiveRecognition();
 
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -839,7 +1278,6 @@ export function AudioChatInputButton() {
     };
   }, [defaultLanguage]);
 
-  // Returns null — buttons are injected as vanilla DOM by useEffect
   return null;
 }
 
@@ -852,10 +1290,33 @@ export function AudioSidebarPanel() {
   const config = configResult.data ?? {};
   const workerAvailable = !configResult.error;
   const defaultLanguage = config.defaultLanguage ?? "es-ES";
+  const { entityId } = useHostContext();
+
+  const [mode, setMode] = useState(() => {
+    try {
+      const saved = parseInt(localStorage.getItem(MODE_KEY) ?? "1", 10);
+      return [1, 2, 3].includes(saved) ? saved : 1;
+    } catch { return 1; }
+  });
+
+  // Mode 3 active state (within panel, not separate page)
+  const [voiceChatActive, setVoiceChatActive] = useState(false);
+
+  const handleModeChange = (m) => {
+    setMode(m);
+    try { localStorage.setItem(MODE_KEY, String(m)); } catch {}
+    if (m === 3) setVoiceChatActive(true);
+    else setVoiceChatActive(false);
+  };
+
+  // When mode 3 is selected but user hasn't clicked "Iniciar" yet
+  const handleStartVoiceChat = () => setVoiceChatActive(true);
+  const handleExitVoiceChat = () => { setVoiceChatActive(false); setMode(1); try { localStorage.setItem(MODE_KEY, "1"); } catch {} };
 
   return _jsxs("div", {
     style: style.panel,
     children: [
+      // Header
       _jsxs("div", {
         style: { ...style.row, justifyContent: "space-between", marginBottom: 2 },
         children: [
@@ -865,9 +1326,61 @@ export function AudioSidebarPanel() {
             : _jsx("span", { style: { ...style.badge, background: "rgba(245,158,11,0.12)", color: COLOR.warning, border: "1px solid rgba(245,158,11,0.25)" }, children: "Solo Nivel 1" }),
         ],
       }),
-      _jsx(DictadoSection, { defaultLanguage }),
-      _jsx(GrabacionSection, { workerAvailable, defaultLanguage }),
-      _jsx(TtsSection, { workerAvailable }),
+
+      // Mode selector
+      _jsx(ModeSelector, { mode, onChange: handleModeChange }),
+
+      // Mode 1: Dictado
+      mode === 1 && _jsx(DictadoSection, { defaultLanguage }),
+
+      // Mode 2: Nota de voz con auto-send
+      mode === 2 && _jsx(GrabacionSection, { workerAvailable, defaultLanguage, autoSend: true }),
+
+      // Mode 3: Voice Chat — either CTA button or full VC panel
+      mode === 3 && !voiceChatActive && _jsxs("div", {
+        style: {
+          ...style.section,
+          background: "rgba(124,58,237,0.06)",
+          border: `1px solid ${COLOR.voiceChatBorder}`,
+          alignItems: "center",
+          gap: 12,
+          padding: "20px 16px",
+        },
+        children: [
+          _jsx("p", { style: { ...style.sectionTitle, color: COLOR.accent, textAlign: "center" }, children: "Voice Chat Mode" }),
+          _jsx("p", { style: { fontSize: 12, color: COLOR.textMuted, textAlign: "center", margin: 0 }, children: "Conversa con el agente completamente por voz. Habla y el agente te responderá en audio." }),
+          _jsx("button", {
+            onClick: handleStartVoiceChat,
+            type: "button",
+            style: {
+              ...style.btn,
+              ...style.btnPrimary,
+              padding: "10px 24px",
+              fontSize: 13,
+              fontWeight: 600,
+              borderRadius: 8,
+              gap: 8,
+            },
+            children: _jsxs(_Fragment, {
+              children: [_jsx(MicIcon, { size: 16, color: "#fff" }), "Iniciar conversación por voz"],
+            }),
+          }),
+          !workerAvailable && _jsx("p", {
+            style: { fontSize: 11, color: COLOR.warning, margin: 0, textAlign: "center" },
+            children: "Requiere worker de audio (Whisper + TTS).",
+          }),
+        ],
+      }),
+
+      mode === 3 && voiceChatActive && _jsx(VoiceChatMode, {
+        workerAvailable,
+        defaultLanguage,
+        agentId: entityId ?? "",
+        onExit: handleExitVoiceChat,
+      }),
+
+      // Show TTS section in Mode 1 & 2 for manual use
+      (mode === 1 || mode === 2) && _jsx(TtsSection, { workerAvailable }),
     ],
   });
 }
