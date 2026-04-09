@@ -7,6 +7,7 @@ export const PLUGIN_VERSION = "0.1.0-opifex.1";
 export const ACTION_KEYS = {
   transcribeAudio: "transcribeAudio",
   synthesizeSpeech: "synthesizeSpeech",
+  synthesizeSpeechStream: "synthesizeSpeechStream",
   getConfig: "getConfig",
 };
 

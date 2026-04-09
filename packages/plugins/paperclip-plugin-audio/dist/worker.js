@@ -1,5 +1,5 @@
 // Plugin Audio — worker
-// Fecha: 2026-04-09 | Issue: SEC-202
+// Fecha: 2026-04-09 | Issue: SEC-202 / SEC-216
 // Estado: Listo para producción (pendiente verificación funcional con audio real)
 
 import { execFile } from "node:child_process";
@@ -78,6 +78,20 @@ async function runWhisper(audioPath, model, language) {
 }
 
 /**
+ * Shared request body for ElevenLabs TTS requests.
+ */
+function elevenLabsBody(text) {
+  return JSON.stringify({
+    text,
+    model_id: "eleven_multilingual_v2",
+    voice_settings: {
+      stability: 0.5,
+      similarity_boost: 0.75,
+    },
+  });
+}
+
+/**
  * Call ElevenLabs TTS API and return MP3 as base64.
  */
 async function callElevenLabsTTS(text, voiceId, apiKey) {
@@ -89,14 +103,7 @@ async function callElevenLabsTTS(text, voiceId, apiKey) {
       "Content-Type": "application/json",
       "Accept": "audio/mpeg",
     },
-    body: JSON.stringify({
-      text,
-      model_id: "eleven_multilingual_v2",
-      voice_settings: {
-        stability: 0.5,
-        similarity_boost: 0.75,
-      },
-    }),
+    body: elevenLabsBody(text),
   });
 
   if (!response.ok) {
@@ -106,6 +113,76 @@ async function callElevenLabsTTS(text, voiceId, apiKey) {
 
   const arrayBuffer = await response.arrayBuffer();
   return Buffer.from(arrayBuffer).toString("base64");
+}
+
+/**
+ * Call ElevenLabs streaming TTS endpoint and push audio chunks to ctx.streams.
+ *
+ * Each emitted event has the shape:
+ *   { type: "chunk", data: "<base64-encoded MP3 fragment>" }
+ *
+ * When the stream ends, a final event is emitted:
+ *   { type: "done", totalBytes: <number> }
+ *
+ * On error, a single event is emitted:
+ *   { type: "error", message: "<description>" }
+ *
+ * UI usage (React component):
+ * ```tsx
+ * const { events } = usePluginStream<TtsStreamEvent>("tts-stream");
+ * // Accumulate base64 chunks → decode → play via Web Audio API or
+ * // concatenate into a Blob URL for <audio> once "done" is received.
+ * ```
+ *
+ * @param {string} text - Text to synthesize
+ * @param {string} voiceId - ElevenLabs voice ID
+ * @param {string} apiKey - ElevenLabs API key
+ * @param {string} channel - Stream channel name (e.g. "tts-stream")
+ * @param {string} companyId - Paperclip company ID for stream scoping
+ * @param {object} streams - ctx.streams from PluginContext
+ */
+async function callElevenLabsTTSStream(text, voiceId, apiKey, channel, companyId, streams) {
+  const url = `${ELEVENLABS_BASE_URL}/text-to-speech/${encodeURIComponent(voiceId)}/stream`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "xi-api-key": apiKey,
+      "Content-Type": "application/json",
+      "Accept": "audio/mpeg",
+    },
+    body: elevenLabsBody(text),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => response.statusText);
+    streams.emit(channel, { type: "error", message: `ElevenLabs TTS error ${response.status}: ${errText}` });
+    streams.close(channel);
+    throw new Error(`ElevenLabs TTS stream error ${response.status}: ${errText}`);
+  }
+
+  if (!response.body) {
+    streams.emit(channel, { type: "error", message: "ElevenLabs returned no response body" });
+    streams.close(channel);
+    throw new Error("ElevenLabs TTS stream: no response body");
+  }
+
+  const reader = response.body.getReader();
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      streams.emit(channel, { type: "chunk", data: Buffer.from(value).toString("base64") });
+    }
+    streams.emit(channel, { type: "done", totalBytes });
+  } finally {
+    streams.close(channel);
+    reader.releaseLock();
+  }
+
+  return totalBytes;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,10 +240,18 @@ const plugin = definePlugin({
       ctx.logger.info("Transcribing audio", { mimeType, model, language });
 
       const audioPath = await writeTempAudio(audioBase64, mimeType);
+      const whisperStart = Date.now();
       try {
         const text = await runWhisper(audioPath, model, language);
-        ctx.logger.info("Transcription complete", { length: text.length });
-        return { text };
+        const whisperMs = Date.now() - whisperStart;
+        ctx.logger.info("Transcription complete", { length: text.length, durationMs: whisperMs, model });
+        // NOTE: SEC-216 benchmark — model=base takes ~52s CPU/FP32 on 7s audio.
+        // model=tiny takes ~2.7s. For Voice Chat Mode, switch to tiny (see SEC-217).
+        if (whisperMs > 3000) {
+          ctx.logger.warn("Whisper latency exceeds 3s target", { durationMs: whisperMs, model,
+            hint: "Consider switching whisperModel to 'tiny' for lower latency (SEC-217)" });
+        }
+        return { text, durationMs: whisperMs };
       } finally {
         await fs.rm(audioPath, { force: true }).catch(() => {});
       }
@@ -211,6 +296,74 @@ const plugin = definePlugin({
       ctx.logger.info("TTS complete", { bytes: Math.round(audioBase64.length * 0.75) });
 
       return { audioBase64, mimeType: "audio/mpeg" };
+    });
+
+    // -----------------------------------------------------------------------
+    // Action: synthesizeSpeechStream
+    // Streaming TTS for Voice Chat Mode (SEC-216).
+    // Calls ElevenLabs /stream endpoint and pushes audio chunks to ctx.streams
+    // so the UI can start playback before the full audio is ready.
+    //
+    // Parameters:
+    //   text     {string} — text to synthesize
+    //   agentId  {string} — used to resolve voiceId from config
+    //   companyId {string} — required for stream channel scoping
+    //   channel  {string} — optional stream channel name (default: "tts-stream")
+    //
+    // Stream events (UI: usePluginStream<TtsStreamEvent>(channel)):
+    //   { type: "chunk", data: string }   — base64-encoded MP3 fragment
+    //   { type: "done",  totalBytes: number }  — stream finished
+    //   { type: "error", message: string } — stream failed
+    //
+    // UI integration pattern:
+    //   1. Call synthesizeSpeechStream({ text, agentId, companyId, channel })
+    //   2. Subscribe to stream via usePluginStream(channel) to receive chunks
+    //   3. Accumulate chunks; on "done", concatenate + decode + play via Web Audio API
+    //      OR use a MediaSource / SourceBuffer to play progressively (see SEC-217 notes)
+    //
+    // Returns: { channel: string, totalBytes: number } when stream completes.
+    // -----------------------------------------------------------------------
+    ctx.actions.register(ACTION_KEYS.synthesizeSpeechStream, async (params) => {
+      const text = String(params.text ?? "");
+      const agentId = String(params.agentId ?? "");
+      const companyId = String(params.companyId ?? "");
+      const channel = String(params.channel ?? "tts-stream");
+
+      if (!text) {
+        throw new Error("synthesizeSpeechStream: text is required");
+      }
+      if (!companyId) {
+        throw new Error("synthesizeSpeechStream: companyId is required for stream channel scoping");
+      }
+
+      const raw = await ctx.config.get();
+      const config = { ...DEFAULT_CONFIG, ...raw };
+
+      const voices = config.voices ?? {};
+      const voiceId = voices[agentId] ?? voices["default"];
+
+      if (!voiceId) {
+        throw new Error(
+          `synthesizeSpeechStream: no voiceId configured for agentId="${agentId}". ` +
+          "Configure it in plugin settings under Voces de agentes."
+        );
+      }
+
+      if (!config.elevenLabsApiKeyRef) {
+        throw new Error(
+          "synthesizeSpeechStream: elevenLabsApiKeyRef is not configured. " +
+          "Add the ElevenLabs secret reference in plugin settings."
+        );
+      }
+
+      const apiKey = await ctx.secrets.resolve(config.elevenLabsApiKeyRef);
+      ctx.logger.info("Streaming TTS start", { agentId, voiceId, channel, textLength: text.length });
+
+      ctx.streams.open(channel, companyId);
+      const totalBytes = await callElevenLabsTTSStream(text, voiceId, apiKey, channel, companyId, ctx.streams);
+
+      ctx.logger.info("Streaming TTS complete", { channel, totalBytes });
+      return { channel, totalBytes, mimeType: "audio/mpeg" };
     });
 
     ctx.logger.info("Audio plugin ready", {

@@ -1,5 +1,5 @@
 // Plugin Audio — manifest
-// Fecha: 2026-04-09 | Issues: SEC-202 (worker) + SEC-203 (UI)
+// Fecha: 2026-04-09 | Issues: SEC-202 (worker) + SEC-203 (UI) + SEC-216 (streaming TTS)
 
 import { DEFAULT_CONFIG, PLUGIN_ID, PLUGIN_VERSION } from "./constants.js";
 
@@ -21,6 +21,7 @@ const manifest = {
     "plugin.state.write",
     "ui.sidebar.register",
     "ui.action.register",
+    "events.emit",
   ],
   entrypoints: {
     worker: "./dist/worker.js",
