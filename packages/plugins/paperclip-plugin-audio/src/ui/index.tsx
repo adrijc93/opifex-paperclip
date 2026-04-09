@@ -1,5 +1,5 @@
 // Plugin Audio — UI source (TypeScript/TSX)
-// Fecha: 2026-04-09 | Issue: SEC-203
+// Fecha: 2026-04-09 | Issue: SEC-211 (fix UX: botón flotante + toggle)
 // Estado: Pendiente aprobación Adrián
 // Criterio de ejecución: compilar con tsc cuando se añada tsconfig.json para este paquete
 
@@ -22,6 +22,48 @@ import {
   usePluginAction,
   type PluginSidebarProps,
 } from "@paperclipai/plugin-sdk/ui";
+
+// ---------------------------------------------------------------------------
+// Chat textarea helpers (SEC-211 fix)
+// ---------------------------------------------------------------------------
+
+function findChatTextarea(): HTMLTextAreaElement | null {
+  const selectors = [
+    'textarea[data-chat-input]',
+    'textarea[data-testid="chat-input"]',
+    '[data-chat-input] textarea',
+    'textarea[placeholder]',
+  ];
+  for (const sel of selectors) {
+    try {
+      const el = document.querySelector<HTMLTextAreaElement>(sel);
+      if (el && el.offsetParent !== null) return el;
+    } catch {}
+  }
+  const all = Array.from(document.querySelectorAll<HTMLTextAreaElement>('textarea'));
+  return all.reverse().find((el) => el.offsetParent !== null) ?? null;
+}
+
+function injectIntoChat(text: string): void {
+  if (!text) return;
+  const ta = findChatTextarea();
+  if (!ta) return;
+  const current = ta.value;
+  const newValue = current
+    ? current.endsWith(' ') ? current + text : current + ' ' + text
+    : text;
+  try {
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+    if (nativeSetter) nativeSetter.call(ta, newValue);
+    else ta.value = newValue;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ta.dispatchEvent(new Event('change', { bubbles: true }));
+    ta.focus();
+    ta.setSelectionRange(newValue.length, newValue.length);
+  } catch {
+    ta.value = newValue;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -170,7 +212,6 @@ const S: Record<string, CSSProperties> = {
 function DictadoSection({ defaultLanguage }: { defaultLanguage: string }) {
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
   const finalRef = useRef("");
@@ -199,18 +240,20 @@ function DictadoSection({ defaultLanguage }: { defaultLanguage: string }) {
       setTranscript(finalRef.current + interim);
     };
 
-    r.onend = () => { setListening(false); if (finalRef.current) setTranscript(finalRef.current); };
+    r.onend = () => {
+      setListening(false);
+      if (finalRef.current) {
+        setTranscript(finalRef.current);
+        // SEC-211: inyectar texto directamente al textarea del chat
+        injectIntoChat(finalRef.current);
+      }
+    };
     r.onerror = (e: any) => { setListening(false); if (e.error !== "no-speech") setError(`Error: ${e.error}`); };
 
     setError(null); setTranscript(""); r.start(); setListening(true);
   }, [listening, supported, defaultLanguage]);
 
   useEffect(() => () => recognitionRef.current?.abort(), []);
-
-  const handleCopy = async () => {
-    try { await copyToClipboard(transcript); setCopied(true); setTimeout(() => setCopied(false), 2000); }
-    catch { setError("Error al copiar"); }
-  };
 
   if (!supported) {
     return (
@@ -227,29 +270,28 @@ function DictadoSection({ defaultLanguage }: { defaultLanguage: string }) {
       <div style={{ ...S.row, justifyContent: "space-between" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ fontSize: 12, color: C.muted }}>
-            {listening ? "Escuchando…" : transcript ? "Texto capturado" : `Idioma: ${defaultLanguage || "es-ES"}`}
+            {listening ? "Escuchando…" : transcript ? "✓ Texto enviado al chat" : `Idioma: ${defaultLanguage || "es-ES"}`}
           </span>
           {error && <span style={{ fontSize: 11, color: C.danger }}>{error}</span>}
         </div>
-        <button onClick={toggle} aria-label={listening ? "Detener" : "Iniciar dictado"} style={{
-          ...S.micBtn,
-          background: listening ? C.dangerLight : C.bg,
-          border: `2px solid ${listening ? C.danger : C.border}`,
-          boxShadow: listening ? `0 0 0 4px rgba(239,68,68,0.15), 0 0 0 8px rgba(239,68,68,0.08)` : "none",
-        }}>
+        {/* SEC-211: onContextMenu + onTouchStart para prevenir menú contextual */}
+        <button
+          onClick={toggle}
+          onContextMenu={(e) => e.preventDefault()}
+          onTouchStart={(e) => { e.preventDefault(); toggle(); }}
+          type="button"
+          aria-label={listening ? "Detener dictado" : "Iniciar dictado"}
+          style={{
+            ...S.micBtn,
+            background: listening ? C.dangerLight : C.bg,
+            border: `2px solid ${listening ? C.danger : C.border}`,
+            boxShadow: listening ? `0 0 0 4px rgba(239,68,68,0.15), 0 0 0 8px rgba(239,68,68,0.08)` : "none",
+          }}>
           <MicIcon size={22} color={listening ? C.danger : C.muted} />
         </button>
       </div>
-      {transcript && <textarea style={S.textarea} value={transcript} readOnly rows={3} aria-label="Texto transcrito" />}
-      {transcript && (
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button style={S.btn} onClick={handleCopy}>
-            <CopyIcon /> {copied ? "¡Copiado!" : "Copiar"}
-          </button>
-        </div>
-      )}
-      {!transcript && !listening && (
-        <p style={S.muted}>Pulsa el micrófono y habla. El texto aparece aquí — cópialo al chat con Ctrl+V.</p>
+      {!listening && !transcript && (
+        <p style={S.muted}>Click para dictar. El texto aparecerá en el chat directamente.</p>
       )}
     </div>
   );
@@ -460,6 +502,123 @@ function TtsSection({ workerAvailable }: { workerAvailable: boolean }) {
       <audio ref={audioRef} style={{ display: "none" }} preload="none" />
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// AudioChatInputButton — slot: toolbarButton (entityTypes: issue)
+// SEC-211: renderiza null pero inyecta botón flotante sobre el chat textarea
+// ---------------------------------------------------------------------------
+
+export function AudioChatInputButton() {
+  const configResult = usePluginData<{ defaultLanguage: string }>(DATA_KEYS.config);
+  const defaultLanguage = configResult.data?.defaultLanguage ?? "es-ES";
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const supported =
+      typeof (window as any).SpeechRecognition !== "undefined" ||
+      typeof (window as any).webkitSpeechRecognition !== "undefined";
+    if (!supported) return;
+
+    let listening = false;
+    let recognition: any = null;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.setAttribute("aria-label", "Dictado por voz (click para iniciar/detener)");
+    btn.title = "Dictado por voz";
+    btn.innerHTML =
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>' +
+      '<path d="M19 10v2a7 7 0 0 1-14 0v-2"/>' +
+      '<line x1="12" y1="19" x2="12" y2="23"/>' +
+      '<line x1="8" y1="23" x2="16" y2="23"/>' +
+      "</svg>";
+
+    const applyIdleStyle = () => {
+      btn.style.cssText =
+        "width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;" +
+        "cursor:pointer;border:1.5px solid rgba(255,255,255,0.18);background:rgba(30,30,40,0.85);" +
+        "color:rgba(255,255,255,0.55);outline:none;padding:0;pointer-events:all;" +
+        "box-shadow:0 1px 4px rgba(0,0,0,0.3);";
+    };
+    const applyRecordingStyle = () => {
+      btn.style.cssText =
+        "width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;" +
+        "cursor:pointer;border:1.5px solid #ef4444;background:rgba(239,68,68,0.18);" +
+        "color:#ef4444;outline:none;padding:0;pointer-events:all;" +
+        "box-shadow:0 0 0 3px rgba(239,68,68,0.22),0 1px 4px rgba(0,0,0,0.3);";
+    };
+    applyIdleStyle();
+
+    const stopListening = () => {
+      try { recognition?.stop(); } catch {}
+      recognition = null; listening = false; applyIdleStyle();
+    };
+
+    const startListening = () => {
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognition = new SR();
+      recognition.lang = defaultLanguage;
+      recognition.interimResults = false;
+      recognition.continuous = false;
+      let finalText = "";
+
+      recognition.onresult = (ev: any) => {
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript;
+        }
+      };
+      recognition.onend = () => {
+        listening = false; applyIdleStyle();
+        if (finalText.trim()) injectIntoChat(finalText.trim());
+        recognition = null;
+      };
+      recognition.onerror = (ev: any) => {
+        if (ev.error !== "no-speech") console.warn("[audio-plugin]", ev.error);
+        listening = false; applyIdleStyle(); recognition = null;
+      };
+
+      recognition.start(); listening = true; applyRecordingStyle();
+    };
+
+    btn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); listening ? stopListening() : startListening(); });
+    btn.addEventListener("contextmenu", (e) => e.preventDefault());
+    btn.addEventListener("touchstart", (e) => { e.preventDefault(); }, { passive: false });
+
+    const container = document.createElement("div");
+    container.id = "paperclip-audio-mic-float";
+    container.style.cssText = "position:fixed;z-index:9999;pointer-events:none;display:flex;align-items:center;justify-content:center;";
+    container.appendChild(btn);
+    document.body.appendChild(container);
+
+    const positionBtn = () => {
+      const ta = findChatTextarea();
+      if (!ta) { container.style.display = "none"; return; }
+      container.style.display = "flex";
+      const rect = ta.getBoundingClientRect();
+      container.style.left = (rect.right - 30 - 6) + "px";
+      container.style.top = (rect.bottom - 30 - 6) + "px";
+      container.style.width = "30px";
+      container.style.height = "30px";
+    };
+
+    positionBtn();
+    window.addEventListener("resize", positionBtn);
+    const observer = new MutationObserver(positionBtn);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: false });
+    const poll = setInterval(positionBtn, 1500);
+
+    return () => {
+      clearInterval(poll);
+      window.removeEventListener("resize", positionBtn);
+      observer.disconnect();
+      stopListening();
+      container.parentNode?.removeChild(container);
+    };
+  }, [defaultLanguage]);
+
+  return null; // El componente no renderiza nada — el botón lo añade el useEffect
 }
 
 // ---------------------------------------------------------------------------

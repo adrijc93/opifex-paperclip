@@ -77,6 +77,17 @@ const manifest = {
         displayName: "Audio",
         exportName: "AudioSidebarPanel",
       },
+      {
+        // Floating mic button — renders via DOM injection in useEffect.
+        // Uses toolbarButton slot so the component is mounted on issue pages
+        // (where chat lives). The component itself returns null; the actual
+        // button is a vanilla-DOM element positioned over the chat textarea.
+        type: "toolbarButton",
+        id: "audio-chat-input",
+        displayName: "Dictado por voz",
+        exportName: "AudioChatInputButton",
+        entityTypes: ["issue"],
+      },
     ],
   },
 };

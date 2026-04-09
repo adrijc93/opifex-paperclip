@@ -1,5 +1,5 @@
 // Plugin Audio — UI
-// Fecha: 2026-04-09 | Issue: SEC-203
+// Fecha: 2026-04-09 | Issue: SEC-211 (fix UX: botón flotante + toggle)
 // Estado: Listo para producción
 // Criterio de ejecución: se activa cuando el plugin audio está instalado en Paperclip
 
@@ -203,6 +203,50 @@ function blobToBase64(blob) {
 }
 
 // ---------------------------------------------------------------------------
+// Chat textarea helpers
+// ---------------------------------------------------------------------------
+
+function findChatTextarea() {
+  // Try specific selectors first, then fall back to last visible textarea
+  const selectors = [
+    'textarea[data-chat-input]',
+    'textarea[data-testid="chat-input"]',
+    '[data-chat-input] textarea',
+    'textarea[placeholder]',
+  ];
+  for (const sel of selectors) {
+    try {
+      const el = document.querySelector(sel);
+      if (el && el.offsetParent !== null) return el;
+    } catch {}
+  }
+  const all = Array.from(document.querySelectorAll('textarea'));
+  return all.reverse().find((el) => el.offsetParent !== null) ?? null;
+}
+
+function injectIntoChat(text) {
+  if (!text) return;
+  const ta = findChatTextarea();
+  if (!ta) return;
+  const current = ta.value;
+  const newValue = current
+    ? current.endsWith(' ') ? current + text : current + ' ' + text
+    : text;
+  try {
+    // Use native setter to bypass React's synthetic event tracking
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+    if (nativeSetter) nativeSetter.call(ta, newValue);
+    else ta.value = newValue;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ta.dispatchEvent(new Event('change', { bubbles: true }));
+    ta.focus();
+    ta.setSelectionRange(newValue.length, newValue.length);
+  } catch {
+    ta.value = newValue;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Icons
 // ---------------------------------------------------------------------------
 
@@ -295,7 +339,11 @@ function DictadoSection({ defaultLanguage }) {
 
     recognition.onend = () => {
       setListening(false);
-      if (finalTranscript) setTranscript(finalTranscript);
+      if (finalTranscript) {
+        setTranscript(finalTranscript);
+        // Inyectar directamente al textarea del chat
+        injectIntoChat(finalTranscript);
+      }
     };
 
     recognition.onerror = (event) => {
@@ -311,17 +359,6 @@ function DictadoSection({ defaultLanguage }) {
   }, [listening, supported, defaultLanguage]);
 
   useEffect(() => () => recognitionRef.current?.abort(), []);
-
-  const handleCopy = async () => {
-    if (!transcript) return;
-    try {
-      await copyToClipboard(transcript);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setError("Error al copiar al portapapeles");
-    }
-  };
 
   if (!supported) {
     return _jsxs("div", {
@@ -345,14 +382,17 @@ function DictadoSection({ defaultLanguage }) {
             children: [
               _jsx("span", {
                 style: { fontSize: 12, color: COLOR.textMuted },
-                children: listening ? "Escuchando…" : transcript ? "Texto capturado" : `Idioma: ${defaultLanguage || "es-ES"}`,
+                children: listening ? "Escuchando…" : transcript ? "✓ Texto enviado al chat" : `Idioma: ${defaultLanguage || "es-ES"}`,
               }),
               error && _jsx("span", { style: { fontSize: 11, color: COLOR.danger }, children: error }),
             ],
           }),
           _jsx("button", {
             onClick: toggleListen,
-            "aria-label": listening ? "Detener grabación" : "Iniciar dictado",
+            onContextMenu: (e) => e.preventDefault(),
+            onTouchStart: (e) => { e.preventDefault(); toggleListen(e); },
+            "aria-label": listening ? "Detener dictado" : "Iniciar dictado",
+            type: "button",
             style: {
               ...style.micCircle,
               background: listening ? COLOR.dangerLight : COLOR.bg,
@@ -363,14 +403,7 @@ function DictadoSection({ defaultLanguage }) {
           }),
         ],
       }),
-      transcript && _jsx("textarea", { style: style.textarea, value: transcript, readOnly: true, "aria-label": "Texto transcrito", rows: 3 }),
-      transcript && _jsxs("div", {
-        style: { ...style.row, justifyContent: "flex-end" },
-        children: [
-          _jsxs("button", { style: style.btn, onClick: handleCopy, title: "Copiar al portapapeles", children: [_jsx(CopyIcon, {}), copied ? "¡Copiado!" : "Copiar"] }),
-        ],
-      }),
-      !transcript && !listening && _jsx("p", { style: { fontSize: 11, color: COLOR.textMuted, margin: 0, fontStyle: "italic" }, children: "Pulsa el micrófono y habla. El texto aparecerá aquí y puedes copiarlo al chat." }),
+      !listening && !transcript && _jsx("p", { style: { fontSize: 11, color: COLOR.textMuted, margin: 0, fontStyle: "italic" }, children: "Click para dictar. El texto aparecerá en el chat directamente." }),
     ],
   });
 }
@@ -614,6 +647,141 @@ function TtsSection({ workerAvailable }) {
       _jsx("audio", { ref: audioRef, style: { display: "none" }, preload: "none" }),
     ],
   });
+}
+
+// ---------------------------------------------------------------------------
+// AudioChatInputButton — floating mic button injected near chat textarea
+// Slot: toolbarButton (entityTypes: issue) — useEffect injects floating DOM el
+// ---------------------------------------------------------------------------
+
+export function AudioChatInputButton() {
+  const configResult = usePluginData(DATA_KEYS.config);
+  const defaultLanguage = configResult.data?.defaultLanguage ?? "es-ES";
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const supported =
+      typeof window.SpeechRecognition !== "undefined" ||
+      typeof window.webkitSpeechRecognition !== "undefined";
+    if (!supported) return;
+
+    let listening = false;
+    let recognition = null;
+
+    // --- Build floating button ---
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.setAttribute("aria-label", "Dictado por voz (click para iniciar/detener)");
+    btn.title = "Dictado por voz";
+    btn.innerHTML =
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>' +
+      '<path d="M19 10v2a7 7 0 0 1-14 0v-2"/>' +
+      '<line x1="12" y1="19" x2="12" y2="23"/>' +
+      '<line x1="8" y1="23" x2="16" y2="23"/>' +
+      "</svg>";
+
+    const applyIdleStyle = () => {
+      btn.style.cssText =
+        "width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;" +
+        "cursor:pointer;border:1.5px solid rgba(255,255,255,0.18);background:rgba(30,30,40,0.85);" +
+        "color:rgba(255,255,255,0.55);outline:none;padding:0;pointer-events:all;" +
+        "box-shadow:0 1px 4px rgba(0,0,0,0.3);transition:background 0.15s,border-color 0.15s,box-shadow 0.2s;";
+    };
+    const applyRecordingStyle = () => {
+      btn.style.cssText =
+        "width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;" +
+        "cursor:pointer;border:1.5px solid #ef4444;background:rgba(239,68,68,0.18);" +
+        "color:#ef4444;outline:none;padding:0;pointer-events:all;" +
+        "box-shadow:0 0 0 3px rgba(239,68,68,0.22),0 1px 4px rgba(0,0,0,0.3);transition:background 0.15s,border-color 0.15s,box-shadow 0.2s;";
+    };
+    applyIdleStyle();
+
+    const stopListening = () => {
+      try { recognition?.stop(); } catch {}
+      recognition = null;
+      listening = false;
+      applyIdleStyle();
+    };
+
+    const startListening = () => {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SR();
+      recognition.lang = defaultLanguage;
+      recognition.interimResults = false;
+      recognition.continuous = false;
+      let finalText = "";
+
+      recognition.onresult = (ev) => {
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript;
+        }
+      };
+      recognition.onend = () => {
+        listening = false;
+        applyIdleStyle();
+        if (finalText.trim()) injectIntoChat(finalText.trim());
+        recognition = null;
+      };
+      recognition.onerror = (ev) => {
+        if (ev.error !== "no-speech") console.warn("[audio-plugin]", ev.error);
+        listening = false;
+        applyIdleStyle();
+        recognition = null;
+      };
+
+      recognition.start();
+      listening = true;
+      applyRecordingStyle();
+    };
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (listening) stopListening();
+      else startListening();
+    });
+    btn.addEventListener("contextmenu", (e) => e.preventDefault());
+    btn.addEventListener("touchstart", (e) => { e.preventDefault(); }, { passive: false });
+
+    // --- Floating container ---
+    const container = document.createElement("div");
+    container.id = "paperclip-audio-mic-float";
+    container.style.cssText =
+      "position:fixed;z-index:9999;pointer-events:none;display:flex;align-items:center;justify-content:center;";
+    container.appendChild(btn);
+    document.body.appendChild(container);
+
+    const positionBtn = () => {
+      const ta = findChatTextarea();
+      if (!ta) { container.style.display = "none"; return; }
+      container.style.display = "flex";
+      const rect = ta.getBoundingClientRect();
+      const margin = 6;
+      const btnSize = 30;
+      container.style.left = rect.right - btnSize - margin + "px";
+      container.style.top = rect.bottom - btnSize - margin + "px";
+      container.style.width = btnSize + "px";
+      container.style.height = btnSize + "px";
+    };
+
+    positionBtn();
+    window.addEventListener("resize", positionBtn);
+    const observer = new MutationObserver(positionBtn);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: false });
+    const poll = setInterval(positionBtn, 1500);
+
+    return () => {
+      clearInterval(poll);
+      window.removeEventListener("resize", positionBtn);
+      observer.disconnect();
+      stopListening();
+      if (container.parentNode) container.parentNode.removeChild(container);
+    };
+  }, [defaultLanguage]);
+
+  // Returns null — this component's job is done via DOM injection in useEffect
+  return null;
 }
 
 // ---------------------------------------------------------------------------
