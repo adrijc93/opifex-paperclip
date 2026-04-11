@@ -307,6 +307,8 @@ export function IssueDetail() {
   const [optimisticComments, setOptimisticComments] = useState<OptimisticIssueComment[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastMarkedReadIssueIdRef = useRef<string | null>(null);
+  const commentsEndRef = useRef<HTMLDivElement>(null);
+  const autoScrollDoneRef = useRef(false);
 
   const { data: issue, isLoading, error } = useQuery({
     queryKey: queryKeys.issues.detail(issueId!),
@@ -1061,6 +1063,21 @@ export function IssueDetail() {
     };
   }, [archiveFromInbox, canQuickArchiveFromInbox, issue?.id]);
 
+  // Reset auto-scroll flag when navigating to a different issue
+  useEffect(() => {
+    autoScrollDoneRef.current = false;
+  }, [issue?.id]);
+
+  // Auto-scroll to bottom of comments when ≥3 comments exist on initial load
+  useEffect(() => {
+    if (autoScrollDoneRef.current) return;
+    if (detailTab !== "comments") return;
+    if (timelineComments.length < 3) return;
+    if (!commentsEndRef.current) return;
+    commentsEndRef.current.scrollIntoView({ behavior: "auto", block: "end" });
+    autoScrollDoneRef.current = true;
+  }, [issue?.id, timelineComments.length, detailTab]);
+
   const copyIssueToClipboard = async () => {
     if (!issue) return;
     const decodeEntities = (text: string) => {
@@ -1563,6 +1580,7 @@ export function IssueDetail() {
             }}
             liveRunSlot={<LiveRunWidget issueId={issueId!} companyId={issue.companyId} />}
           />
+          <div ref={commentsEndRef} />
         </TabsContent>
 
         <TabsContent value="subissues">
