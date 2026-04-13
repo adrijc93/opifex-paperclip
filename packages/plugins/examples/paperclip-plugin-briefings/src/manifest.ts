@@ -2,7 +2,7 @@ import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
 
 export const PLUGIN_ID = "opifex.paperclip-plugin-briefings";
 export const PLUGIN_VERSION = "0.1.0";
-export const PAGE_ROUTE = "/reuniones";
+export const PAGE_ROUTE = "reuniones";
 
 const manifest: PaperclipPluginManifestV1 = {
   id: PLUGIN_ID,
@@ -65,6 +65,18 @@ const manifest: PaperclipPluginManifestV1 = {
       },
     },
   ],
+  launchers: [
+    {
+      id: "reuniones-nav",
+      displayName: "Reuniones",
+      description: "Briefings y reuniones del equipo",
+      placementZone: "sidebar",
+      action: {
+        type: "navigate",
+        target: `/plugins/${PLUGIN_ID}`,
+      },
+    },
+  ],
   ui: {
     slots: [
       {
@@ -75,7 +87,7 @@ const manifest: PaperclipPluginManifestV1 = {
         routePath: PAGE_ROUTE,
       },
       {
-        type: "sidebar",
+        type: "sidebarPanel",
         id: "briefings-sidebar",
         displayName: "Reuniones",
         exportName: "BriefingsSidebar",

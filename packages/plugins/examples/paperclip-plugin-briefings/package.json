@@ -25,7 +25,7 @@
   "author": "Plugin Author",
   "license": "MIT",
   "devDependencies": {
-    "@paperclipai/plugin-sdk": "workspace:*",
+    "@paperclipai/plugin-sdk": "2026.331.0-canary.4",
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@rollup/plugin-typescript": "^12.1.2",
     "@types/node": "^24.6.0",

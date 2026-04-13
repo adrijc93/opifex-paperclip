@@ -9,14 +9,35 @@ import {
 import type { Briefing, BriefingType } from "../worker.js";
 
 // ---------------------------------------------------------------------------
-// Shared styles
+// Theme-aware colors using CSS variables from Paperclip host (Radix)
+// These adapt automatically to dark/light mode
 // ---------------------------------------------------------------------------
 
-const COLORS = {
-  daily: "#3b82f6",
-  weekly: "#8b5cf6",
-  sprint: "#10b981",
-} as const;
+const t = {
+  bg: "var(--color-background, var(--slate-1, #fcfcfd))",
+  bgCard: "var(--color-surface, var(--slate-2, #f9f9fb))",
+  bgHover: "var(--slate-3, #f0f0f3)",
+  border: "var(--slate-6, #d9d9e0)",
+  borderSubtle: "var(--slate-4, #e8e8ec)",
+  text: "var(--slate-12, #1c2024)",
+  textSecondary: "var(--slate-11, #60646c)",
+  textMuted: "var(--slate-9, #8b8d98)",
+  inputBg: "var(--slate-2, #f9f9fb)",
+  inputBorder: "var(--slate-6, #d9d9e0)",
+  errorBg: "var(--red-3, #fef2f2)",
+  errorBorder: "var(--red-6, #fca5a5)",
+  errorText: "var(--red-11, #dc2626)",
+  accentBg: "var(--blue-3, #eff6ff)",
+  accentBorder: "var(--blue-9, #3b82f6)",
+  accentText: "var(--blue-11, #0d74ce)",
+  tagBg: "var(--slate-3, #f3f4f6)",
+};
+
+const COLORS: Record<BriefingType, string> = {
+  daily: "var(--blue-9, #3b82f6)",
+  weekly: "var(--violet-9, #8b5cf6)",
+  sprint: "var(--green-9, #10b981)",
+};
 
 const LABELS: Record<BriefingType, string> = {
   daily: "Daily",
@@ -47,13 +68,14 @@ function BriefingCard({
   });
 
   const cardStyle: CSSProperties = {
-    border: `1px solid #e5e7eb`,
+    border: `1px solid ${t.border}`,
     borderLeft: `4px solid ${color}`,
     borderRadius: "6px",
     padding: "12px 16px",
-    background: "#fff",
+    background: t.bgCard,
     cursor: "pointer",
     marginBottom: "10px",
+    transition: "background 0.15s",
   };
 
   const badgeStyle: CSSProperties = {
@@ -72,23 +94,23 @@ function BriefingCard({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span style={badgeStyle}>{LABELS[briefing.type]}</span>
-          <strong style={{ fontSize: "14px" }}>{briefing.title}</strong>
+          <strong style={{ fontSize: "14px", color: t.text }}>{briefing.title}</strong>
         </div>
-        <span style={{ fontSize: "12px", color: "#6b7280" }}>{dateLabel}</span>
+        <span style={{ fontSize: "12px", color: t.textMuted }}>{dateLabel}</span>
       </div>
 
       {briefing.authorAgentName && (
-        <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "4px" }}>
+        <div style={{ fontSize: "12px", color: t.textMuted, marginTop: "4px" }}>
           por {briefing.authorAgentName}
         </div>
       )}
 
       {expanded && (
-        <div style={{ marginTop: "12px", borderTop: "1px solid #f3f4f6", paddingTop: "12px" }}>
+        <div style={{ marginTop: "12px", borderTop: `1px solid ${t.borderSubtle}`, paddingTop: "12px" }}>
           <div
             style={{
               fontSize: "13px",
-              color: "#374151",
+              color: t.textSecondary,
               whiteSpace: "pre-wrap",
               lineHeight: "1.6",
             }}
@@ -98,12 +120,12 @@ function BriefingCard({
 
           {briefing.actionItems.length > 0 && (
             <div style={{ marginTop: "10px" }}>
-              <strong style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>
+              <strong style={{ fontSize: "12px", color: t.textMuted, textTransform: "uppercase" }}>
                 Acciones
               </strong>
               <ul style={{ margin: "6px 0 0 0", paddingLeft: "18px" }}>
                 {briefing.actionItems.map((item, i) => (
-                  <li key={i} style={{ fontSize: "13px", color: "#374151", marginBottom: "2px" }}>
+                  <li key={i} style={{ fontSize: "13px", color: t.textSecondary, marginBottom: "2px" }}>
                     {item}
                   </li>
                 ))}
@@ -113,7 +135,7 @@ function BriefingCard({
 
           {briefing.linkedIssueIds.length > 0 && (
             <div style={{ marginTop: "10px" }}>
-              <strong style={{ fontSize: "12px", color: "#6b7280", textTransform: "uppercase" }}>
+              <strong style={{ fontSize: "12px", color: t.textMuted, textTransform: "uppercase" }}>
                 Issues
               </strong>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
@@ -122,10 +144,10 @@ function BriefingCard({
                     key={id}
                     style={{
                       fontSize: "11px",
-                      background: "#f3f4f6",
+                      background: t.tagBg,
                       padding: "2px 6px",
                       borderRadius: "4px",
-                      color: "#374151",
+                      color: t.textSecondary,
                       fontFamily: "monospace",
                     }}
                   >
@@ -185,17 +207,19 @@ function CreateBriefingForm({ onClose }: { onClose: () => void }) {
   const inputStyle: CSSProperties = {
     width: "100%",
     padding: "8px 10px",
-    border: "1px solid #d1d5db",
+    border: `1px solid ${t.inputBorder}`,
     borderRadius: "5px",
     fontSize: "13px",
     boxSizing: "border-box",
+    background: t.inputBg,
+    color: t.text,
   };
 
   const labelStyle: CSSProperties = {
     display: "block",
     fontSize: "12px",
     fontWeight: 600,
-    color: "#374151",
+    color: t.textSecondary,
     marginBottom: "4px",
   };
 
@@ -204,7 +228,7 @@ function CreateBriefingForm({ onClose }: { onClose: () => void }) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0,0,0,0.4)",
+        background: "rgba(0,0,0,0.5)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -214,12 +238,13 @@ function CreateBriefingForm({ onClose }: { onClose: () => void }) {
       <form
         onSubmit={(e) => { void handleSubmit(e); }}
         style={{
-          background: "#fff",
+          background: t.bgCard,
           borderRadius: "8px",
           padding: "24px",
           width: "100%",
           maxWidth: "520px",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+          border: `1px solid ${t.border}`,
         }}
       >
         <div
@@ -230,7 +255,7 @@ function CreateBriefingForm({ onClose }: { onClose: () => void }) {
             marginBottom: "20px",
           }}
         >
-          <h2 style={{ margin: 0, fontSize: "16px" }}>Nuevo Briefing</h2>
+          <h2 style={{ margin: 0, fontSize: "16px", color: t.text }}>Nuevo Briefing</h2>
           <button
             type="button"
             onClick={onClose}
@@ -239,7 +264,7 @@ function CreateBriefingForm({ onClose }: { onClose: () => void }) {
               border: "none",
               fontSize: "18px",
               cursor: "pointer",
-              color: "#6b7280",
+              color: t.textMuted,
             }}
           >
             ✕
@@ -287,7 +312,7 @@ function CreateBriefingForm({ onClose }: { onClose: () => void }) {
             <textarea
               value={actionItemsText}
               onChange={(e) => setActionItemsText(e.target.value)}
-              placeholder="- Revisar PR #123&#10;- Desplegar a staging"
+              placeholder={"- Revisar PR #123\n- Desplegar a staging"}
               rows={3}
               style={{ ...inputStyle, resize: "vertical" }}
             />
@@ -310,11 +335,11 @@ function CreateBriefingForm({ onClose }: { onClose: () => void }) {
             style={{
               marginTop: "12px",
               padding: "8px 12px",
-              background: "#fef2f2",
-              border: "1px solid #fca5a5",
+              background: t.errorBg,
+              border: `1px solid ${t.errorBorder}`,
               borderRadius: "5px",
               fontSize: "13px",
-              color: "#dc2626",
+              color: t.errorText,
             }}
           >
             {error}
@@ -334,9 +359,10 @@ function CreateBriefingForm({ onClose }: { onClose: () => void }) {
             onClick={onClose}
             style={{
               padding: "8px 16px",
-              border: "1px solid #d1d5db",
+              border: `1px solid ${t.border}`,
               borderRadius: "5px",
-              background: "#fff",
+              background: t.bgCard,
+              color: t.text,
               cursor: "pointer",
               fontSize: "13px",
             }}
@@ -350,7 +376,7 @@ function CreateBriefingForm({ onClose }: { onClose: () => void }) {
               padding: "8px 16px",
               border: "none",
               borderRadius: "5px",
-              background: "#3b82f6",
+              background: "var(--blue-9, #3b82f6)",
               color: "#fff",
               cursor: saving ? "not-allowed" : "pointer",
               fontSize: "13px",
@@ -392,10 +418,10 @@ export function BriefingsPage(_props: PluginPageProps) {
   const filterBtnStyle = (active: boolean): CSSProperties => ({
     padding: "6px 14px",
     border: "1px solid",
-    borderColor: active ? "#3b82f6" : "#d1d5db",
+    borderColor: active ? "var(--blue-9, #3b82f6)" : t.border,
     borderRadius: "999px",
-    background: active ? "#eff6ff" : "#fff",
-    color: active ? "#3b82f6" : "#6b7280",
+    background: active ? t.accentBg : t.bgCard,
+    color: active ? t.accentText : t.textMuted,
     fontWeight: active ? 600 : 400,
     cursor: "pointer",
     fontSize: "13px",
@@ -408,6 +434,7 @@ export function BriefingsPage(_props: PluginPageProps) {
         maxWidth: "760px",
         margin: "0 auto",
         fontFamily: "system-ui, sans-serif",
+        color: t.text,
       }}
     >
       {showForm && <CreateBriefingForm onClose={handleFormClose} />}
@@ -420,14 +447,14 @@ export function BriefingsPage(_props: PluginPageProps) {
           marginBottom: "20px",
         }}
       >
-        <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700 }}>Reuniones</h1>
+        <h1 style={{ margin: 0, fontSize: "20px", fontWeight: 700, color: t.text }}>Reuniones</h1>
         <button
           onClick={() => setShowForm(true)}
           style={{
             padding: "8px 16px",
             border: "none",
             borderRadius: "6px",
-            background: "#3b82f6",
+            background: "var(--blue-9, #3b82f6)",
             color: "#fff",
             cursor: "pointer",
             fontSize: "13px",
@@ -451,7 +478,7 @@ export function BriefingsPage(_props: PluginPageProps) {
       </div>
 
       {loading && (
-        <div style={{ color: "#6b7280", fontSize: "14px", padding: "24px 0", textAlign: "center" }}>
+        <div style={{ color: t.textMuted, fontSize: "14px", padding: "24px 0", textAlign: "center" }}>
           Cargando briefings...
         </div>
       )}
@@ -460,10 +487,10 @@ export function BriefingsPage(_props: PluginPageProps) {
         <div
           style={{
             padding: "12px 16px",
-            background: "#fef2f2",
-            border: "1px solid #fca5a5",
+            background: t.errorBg,
+            border: `1px solid ${t.errorBorder}`,
             borderRadius: "6px",
-            color: "#dc2626",
+            color: t.errorText,
             fontSize: "13px",
           }}
         >
@@ -476,8 +503,8 @@ export function BriefingsPage(_props: PluginPageProps) {
           style={{
             padding: "48px 24px",
             textAlign: "center",
-            color: "#9ca3af",
-            border: "1px dashed #e5e7eb",
+            color: t.textMuted,
+            border: `1px dashed ${t.border}`,
             borderRadius: "8px",
           }}
         >
@@ -503,7 +530,7 @@ export function BriefingsPage(_props: PluginPageProps) {
 }
 
 // ---------------------------------------------------------------------------
-// BriefingsSidebar (launcher entry in sidebar)
+// BriefingsSidebar
 // ---------------------------------------------------------------------------
 
 export function BriefingsSidebar(_props: PluginSidebarProps) {
@@ -517,20 +544,21 @@ export function BriefingsSidebar(_props: PluginSidebarProps) {
         padding: "8px 12px",
         fontSize: "13px",
         fontFamily: "system-ui, sans-serif",
+        color: t.text,
       }}
     >
       <div style={{ fontWeight: 600, marginBottom: "4px" }}>Reuniones</div>
       {count === 0 ? (
-        <div style={{ color: "#9ca3af" }}>Sin briefings aún</div>
+        <div style={{ color: t.textMuted }}>Sin briefings aún</div>
       ) : (
         <>
-          <div style={{ color: "#6b7280" }}>{count} briefing{count !== 1 ? "s" : ""}</div>
+          <div style={{ color: t.textSecondary }}>{count} briefing{count !== 1 ? "s" : ""}</div>
           {latest && (
             <div
               style={{
                 marginTop: "4px",
                 fontSize: "11px",
-                color: "#9ca3af",
+                color: t.textMuted,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",

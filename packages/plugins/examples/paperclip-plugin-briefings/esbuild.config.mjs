@@ -4,7 +4,10 @@ import { createPluginBundlerPresets } from "@paperclipai/plugin-sdk/bundlers";
 const presets = createPluginBundlerPresets({ uiEntry: "src/ui/index.tsx" });
 const watch = process.argv.includes("--watch");
 
-const workerCtx = await esbuild.context(presets.esbuild.worker);
+const workerCtx = await esbuild.context({
+  ...presets.esbuild.worker,
+  external: [...(presets.esbuild.worker.external || []), "@paperclipai/plugin-sdk"],
+});
 const manifestCtx = await esbuild.context(presets.esbuild.manifest);
 const uiCtx = await esbuild.context(presets.esbuild.ui);
 
