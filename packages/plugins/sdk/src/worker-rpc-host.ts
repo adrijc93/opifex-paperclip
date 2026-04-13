@@ -34,6 +34,7 @@
  * @see PLUGIN_SPEC.md §14 — SDK Surface
  */
 
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -209,8 +210,11 @@ export function runWorker(
   }
   const entry = process.argv[1];
   if (typeof entry !== "string") return;
-  const thisFile = path.resolve(fileURLToPath(moduleUrl));
-  const entryPath = path.resolve(entry);
+  // Resolve symlinks on both sides so that workers installed as pnpm workspace
+  // symlinks (where process.argv[1] keeps the symlink path but import.meta.url
+  // is the real path) still match correctly.
+  const thisFile = realpathSync(path.resolve(fileURLToPath(moduleUrl)));
+  const entryPath = realpathSync(path.resolve(entry));
   if (thisFile === entryPath) {
     startWorkerRpcHost({ plugin });
   }
