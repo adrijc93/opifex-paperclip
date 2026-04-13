@@ -865,6 +865,27 @@ export function routineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeup
       }
     });
 
+    // Emit issue.created so plugins (e.g. adaptive-heartbeat) track the assignment.
+    // The HTTP issue-create route does this for manually created issues; routine dispatch
+    // bypasses that route and previously never emitted this event, causing the plugin's
+    // countBacklog() to always return 0 for routine-execution issues.
+    if (run.status === "issue_created" && run.linkedIssueId) {
+      const actorId = input.source === "schedule" ? "routine-scheduler" : "routine-api";
+      try {
+        await logActivity(db, {
+          companyId: input.routine.companyId,
+          actorType: "system",
+          actorId,
+          action: "issue.created",
+          entityType: "issue",
+          entityId: run.linkedIssueId,
+          details: { routineId: input.routine.id, source: input.source },
+        });
+      } catch (err) {
+        logger.warn({ err, routineId: input.routine.id, issueId: run.linkedIssueId }, "failed to emit issue.created for routine execution issue");
+      }
+    }
+
     if (input.source === "schedule" || input.source === "webhook") {
       const actorId = input.source === "schedule" ? "routine-scheduler" : "routine-webhook";
       try {
