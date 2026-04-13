@@ -38,6 +38,7 @@ COPY packages/adapters/pi-local/package.json packages/adapters/pi-local/
 COPY packages/plugins/sdk/package.json packages/plugins/sdk/
 COPY packages/plugins/paperclip-plugin-acp/package.json packages/plugins/paperclip-plugin-acp/
 COPY packages/plugins/paperclip-plugin-discord/package.json packages/plugins/paperclip-plugin-discord/
+COPY packages/plugins/paperclip-plugin-audio/package.json packages/plugins/paperclip-plugin-audio/
 COPY packages/plugins/adaptive-heartbeat/package.json packages/plugins/adaptive-heartbeat/
 COPY patches/ patches/
 
