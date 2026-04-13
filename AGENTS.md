@@ -189,7 +189,7 @@ Errores detectados en sesión de revisión manual. Aplicar siempre antes de marc
 
 7. **Plugins: habilitar tras instalar.** Después de instalar un plugin verificar status y habilitar si está disabled: `POST /api/plugins/{pluginId}/enable`.
 
-## 11. Fork-Specific: HenkDz/paperclip
+## 13. Fork-Specific: HenkDz/paperclip
 
 This is a fork of `paperclipai/paperclip` with QoL patches and an **external-only** Hermes adapter story on branch `feat/externalize-hermes-adapter` ([tree](https://github.com/HenkDz/paperclip/tree/feat/externalize-hermes-adapter)).
 
