@@ -26,7 +26,10 @@ import type {
 import { pluginsApi, type PluginUiContribution } from "@/api/plugins";
 import { authApi } from "@/api/auth";
 import { Button } from "@/components/ui/button";
-import { useNavigate, useLocation } from "@/lib/router";
+import { MessageSquare, FileText, Plug } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { useNavigate, useLocation, Link } from "@/lib/router";
+import { useSidebar } from "@/context/SidebarContext";
 import { queryKeys } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
 import {
@@ -724,6 +727,22 @@ export function usePluginLauncherRuntime(): PluginLauncherRuntimeContextValue {
   return value;
 }
 
+const SIDEBAR_LAUNCHER_ICONS: Record<string, LucideIcon> = {
+  "paperclip-chat": MessageSquare,
+  "chat": MessageSquare,
+  "briefings": FileText,
+  "paperclip-plugin-briefings": FileText,
+  "opifex.paperclip-plugin-briefings": FileText,
+};
+
+function resolveLauncherIcon(launcher: ResolvedPluginLauncher): LucideIcon | null {
+  const byKey = SIDEBAR_LAUNCHER_ICONS[launcher.pluginKey];
+  if (byKey) return byKey;
+  const byName = SIDEBAR_LAUNCHER_ICONS[launcher.displayName.toLowerCase()];
+  if (byName) return byName;
+  return Plug;
+}
+
 function DefaultLauncherTrigger({
   launcher,
   placementZone,
@@ -731,8 +750,40 @@ function DefaultLauncherTrigger({
 }: {
   launcher: ResolvedPluginLauncher;
   placementZone: PluginLauncherPlacementZone;
-  onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onClick: (event: ReactMouseEvent<HTMLButtonElement | HTMLAnchorElement>) => void;
 }) {
+  const sidebar = useSidebar();
+  if (placementZone === "sidebar") {
+    const IconComponent = resolveLauncherIcon(launcher);
+    const itemClass = "flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium transition-colors text-foreground/80 hover:bg-accent/50 hover:text-foreground w-full text-left no-underline";
+    // Plain navigate actions: render as a Link so click navigates immediately
+    // and closes the sidebar on mobile, like SidebarNavItem does.
+    if (launcher.action.type === "navigate") {
+      return (
+        <Link
+          to={launcher.action.target}
+          onClick={() => { if (sidebar.isMobile) sidebar.setSidebarOpen(false); }}
+          className={itemClass}
+        >
+          {IconComponent && <IconComponent className="h-4 w-4 shrink-0" />}
+          <span className="truncate">{launcher.displayName}</span>
+        </Link>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={(event) => {
+          onClick(event);
+          if (sidebar.isMobile) sidebar.setSidebarOpen(false);
+        }}
+        className={itemClass}
+      >
+        {IconComponent && <IconComponent className="h-4 w-4 shrink-0" />}
+        <span className="truncate">{launcher.displayName}</span>
+      </button>
+    );
+  }
   return (
     <Button
       type="button"

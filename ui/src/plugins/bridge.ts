@@ -453,14 +453,32 @@ export function usePluginStream<T = unknown>(
       setConnected(false);
     });
 
+    // Track consecutive errors for giving up after too many
+    let consecutiveErrors = 0;
+    const MAX_RETRIES = 5;
+
     source.onerror = () => {
-      setConnecting(false);
+      consecutiveErrors++;
       setConnected(false);
-      setError(new Error(`Failed to connect to plugin stream "${channel}"`));
-      source.close();
-      if (sourceRef.current === source) {
-        sourceRef.current = null;
+      setConnecting(true); // show "reconnecting" state
+
+      if (consecutiveErrors >= MAX_RETRIES) {
+        // Give up after MAX_RETRIES consecutive errors
+        setConnecting(false);
+        setError(new Error(`Failed to connect to plugin stream "${channel}" after ${MAX_RETRIES} retries`));
+        source.close();
+        if (sourceRef.current === source) {
+          sourceRef.current = null;
+        }
       }
+      // Otherwise: do NOT close — let EventSource auto-reconnect (browser spec behavior)
+    };
+
+    // Reset error counter on successful message
+    const origOnMessage = source.onmessage;
+    source.onmessage = (event) => {
+      consecutiveErrors = 0; // reset on success
+      origOnMessage?.call(source, event);
     };
 
     return () => {
