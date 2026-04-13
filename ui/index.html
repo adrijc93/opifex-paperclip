@@ -40,6 +40,16 @@
         }
       })();
     </script>
+    <script>
+      // Lock to portrait orientation (only works when fullscreen / installed as PWA)
+      (() => {
+        try {
+          if (screen.orientation && typeof screen.orientation.lock === "function") {
+            screen.orientation.lock("portrait").catch(() => { /* ignored if not allowed */ });
+          }
+        } catch {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
