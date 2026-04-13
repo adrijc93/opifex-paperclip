@@ -13,6 +13,7 @@ import { agentsApi } from "../api/agents";
 import { heartbeatsApi } from "../api/heartbeats";
 import { instanceSettingsApi } from "../api/instanceSettings";
 import { projectsApi } from "../api/projects";
+import { goalsApi } from "../api/goals";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useGeneralSettings } from "../context/GeneralSettingsContext";
@@ -72,8 +73,11 @@ import {
   UserPlus,
   Columns3,
   Search,
+  Filter,
+  CheckCheck,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { PageTabBar } from "../components/PageTabBar";
 import type { Approval, HeartbeatRun, Issue, JoinRequest } from "@paperclipai/shared";
 import {
@@ -799,8 +803,16 @@ export function Inbox() {
     retry: false,
   });
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [allCategoryFilter, setAllCategoryFilter] = useState<InboxCategoryFilter>("everything");
   const [allApprovalFilter, setAllApprovalFilter] = useState<InboxApprovalFilter>("all");
+  const [filterProjectId, setFilterProjectId] = useState<string | null>(() => {
+    try { return localStorage.getItem("paperclip.inbox.filterProjectId") || null; } catch { return null; }
+  });
+  const [filterGoalId, setFilterGoalId] = useState<string | null>(() => {
+    try { return localStorage.getItem("paperclip.inbox.filterGoalId") || null; } catch { return null; }
+  });
   const [visibleIssueColumns, setVisibleIssueColumns] = useState<InboxIssueColumn[]>(loadInboxIssueColumns);
   const { dismissed, dismiss } = useDismissedInboxItems();
   const { readItems, markRead: markItemRead, markUnread: markItemUnread } = useReadInboxItems();
@@ -835,6 +847,11 @@ export function Inbox() {
   const { data: projects } = useQuery({
     queryKey: queryKeys.projects.list(selectedCompanyId!),
     queryFn: () => projectsApi.list(selectedCompanyId!),
+    enabled: !!selectedCompanyId,
+  });
+  const { data: goals } = useQuery({
+    queryKey: queryKeys.goals.list(selectedCompanyId!),
+    queryFn: () => goalsApi.list(selectedCompanyId!),
     enabled: !!selectedCompanyId,
   });
   const isolatedWorkspacesEnabled = experimentalSettings?.enableIsolatedWorkspaces === true;
@@ -1060,10 +1077,51 @@ export function Inbox() {
     [approvalsToRender, issuesToRender, showApprovalsCategory, showTouchedCategory, tab, failedRunsForTab, joinRequestsForTab],
   );
 
+  // Project IDs that belong to the selected goal (for goal filtering)
+  const projectIdsForGoal = useMemo(() => {
+    if (!filterGoalId || !projects) return null;
+    const ids = new Set<string>();
+    for (const p of projects) {
+      if (p.goalId === filterGoalId || p.goalIds?.includes(filterGoalId)) {
+        ids.add(p.id);
+      }
+    }
+    return ids;
+  }, [filterGoalId, projects]);
+
   const filteredWorkItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return workItemsToRender;
+    const hasProjectFilter = !!filterProjectId;
+    const hasGoalFilter = !!filterGoalId;
+    const hasAnyFilter = !!q || hasProjectFilter || hasGoalFilter;
+    if (!hasAnyFilter) return workItemsToRender;
+
     return workItemsToRender.filter((item) => {
+      // ── Project / Goal filter (applies to issues and failed runs with linked issues) ──
+      if (hasProjectFilter || hasGoalFilter) {
+        let issueForFilter: Issue | undefined;
+        if (item.kind === "issue") {
+          issueForFilter = item.issue;
+        } else if (item.kind === "failed_run") {
+          const linkedId = readIssueIdFromRun(item.run);
+          if (linkedId) issueForFilter = issueById.get(linkedId);
+        }
+        // Non-issue items pass through project/goal filters
+        if (issueForFilter) {
+          if (hasProjectFilter && issueForFilter.projectId !== filterProjectId) return false;
+          if (hasGoalFilter) {
+            const matchesGoalDirectly = issueForFilter.goalId === filterGoalId;
+            const matchesGoalViaProject = issueForFilter.projectId ? projectIdsForGoal?.has(issueForFilter.projectId) : false;
+            if (!matchesGoalDirectly && !matchesGoalViaProject) return false;
+          }
+        } else if (item.kind === "issue" || item.kind === "failed_run") {
+          // Issue/run without matching project or goal → filter out
+          return false;
+        }
+      }
+
+      // ── Text search ──
+      if (!q) return true;
       if (item.kind === "issue") {
         const issue = item.issue;
         if (issue.title.toLowerCase().includes(q)) return true;
@@ -1111,6 +1169,9 @@ export function Inbox() {
   }, [
     workItemsToRender,
     searchQuery,
+    filterProjectId,
+    filterGoalId,
+    projectIdsForGoal,
     agentById,
     defaultProjectWorkspaceIdByProjectId,
     executionWorkspaceById,
@@ -1584,17 +1645,123 @@ export function Inbox() {
           />
         </Tabs>
 
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder="Search inbox…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-8 w-[180px] pl-8 text-xs sm:w-[220px]"
-            />
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {searchOpen ? (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                ref={searchInputRef}
+                type="search"
+                placeholder="Search…"
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onBlur={() => { if (!searchQuery) setSearchOpen(false); }}
+                onKeyDown={(e) => { if (e.key === "Escape") { setSearchQuery(""); setSearchOpen(false); } }}
+                className="h-8 w-[160px] pl-8 text-xs sm:w-[200px]"
+              />
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-muted-foreground hover:text-foreground"
+              title="Search"
+              onClick={() => setSearchOpen(true)}
+            >
+              <Search className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`h-8 px-2 text-xs ${(filterProjectId || filterGoalId) ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground hover:text-foreground"}`}
+                title="Filter"
+              >
+                <Filter className="h-3.5 w-3.5" />
+                {(filterProjectId || filterGoalId) && (
+                  <span className="text-[10px] font-medium ml-0.5">
+                    {(filterProjectId ? 1 : 0) + (filterGoalId ? 1 : 0)}
+                  </span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-[min(320px,calc(100vw-2rem))] p-0">
+              <div className="p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Filter inbox</span>
+                  {(filterProjectId || filterGoalId) && (
+                    <button
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setFilterProjectId(null);
+                        setFilterGoalId(null);
+                        try { localStorage.removeItem("paperclip.inbox.filterProjectId"); localStorage.removeItem("paperclip.inbox.filterGoalId"); } catch {}
+                      }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-xs text-muted-foreground">Project</span>
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      className={`px-2 py-1 text-xs rounded-full border transition-colors ${!filterProjectId ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"}`}
+                      onClick={() => { setFilterProjectId(null); try { localStorage.removeItem("paperclip.inbox.filterProjectId"); } catch {} }}
+                    >
+                      All
+                    </button>
+                    {(projects ?? []).map((p) => (
+                      <button
+                        key={p.id}
+                        className={`px-2 py-1 text-xs rounded-full border transition-colors flex items-center gap-1 ${filterProjectId === p.id ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"}`}
+                        onClick={() => {
+                          const next = filterProjectId === p.id ? null : p.id;
+                          setFilterProjectId(next);
+                          try { if (next) localStorage.setItem("paperclip.inbox.filterProjectId", next); else localStorage.removeItem("paperclip.inbox.filterProjectId"); } catch {}
+                        }}
+                      >
+                        {p.color && <span className="inline-block h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: p.color }} />}
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {(goals ?? []).length > 0 && (
+                  <>
+                    <div className="border-t border-border" />
+                    <div className="space-y-1.5">
+                      <span className="text-xs text-muted-foreground">Goal</span>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          className={`px-2 py-1 text-xs rounded-full border transition-colors ${!filterGoalId ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"}`}
+                          onClick={() => { setFilterGoalId(null); try { localStorage.removeItem("paperclip.inbox.filterGoalId"); } catch {} }}
+                        >
+                          All
+                        </button>
+                        {(goals ?? []).map((g) => (
+                          <button
+                            key={g.id}
+                            className={`px-2 py-1 text-xs rounded-full border transition-colors ${filterGoalId === g.id ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"}`}
+                            onClick={() => {
+                              const next = filterGoalId === g.id ? null : g.id;
+                              setFilterGoalId(next);
+                              try { if (next) localStorage.setItem("paperclip.inbox.filterGoalId", next); else localStorage.removeItem("paperclip.inbox.filterGoalId"); } catch {}
+                            }}
+                          >
+                            {g.title}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -1602,9 +1769,9 @@ export function Inbox() {
                 variant="ghost"
                 size="sm"
                 className="h-8 shrink-0 px-2 text-xs text-muted-foreground hover:text-foreground"
+                title="Show / hide columns"
               >
-                <Columns3 className="mr-1 h-3.5 w-3.5" />
-                Show / hide columns
+                <Columns3 className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-[300px] rounded-xl border-border/70 p-1.5 shadow-xl shadow-black/10">
@@ -1651,13 +1818,14 @@ export function Inbox() {
             <>
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 size="sm"
-                className="h-8 shrink-0"
+                className="h-8 shrink-0 px-2 text-muted-foreground hover:text-foreground"
                 onClick={() => setShowMarkAllReadConfirm(true)}
                 disabled={markAllReadMutation.isPending}
+                title="Mark all as read"
               >
-                {markAllReadMutation.isPending ? "Marking…" : "Mark all as read"}
+                <CheckCheck className="h-3.5 w-3.5" />
               </Button>
               <Dialog open={showMarkAllReadConfirm} onOpenChange={setShowMarkAllReadConfirm}>
                 <DialogContent className="sm:max-w-md">
@@ -1903,6 +2071,7 @@ export function Inbox() {
                     issue={issue}
                     issueLinkState={issueLinkState}
                     selected={isSelected}
+                    projectColor={issueProject?.color ?? undefined}
                     className={
                       isArchiving
                         ? "pointer-events-none -translate-x-4 scale-[0.98] opacity-0 transition-all duration-200 ease-out"

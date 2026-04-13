@@ -244,9 +244,11 @@ export function Layout() {
     const previousOverflow = document.body.style.overflow;
 
     document.body.style.overflow = isMobile ? "visible" : "hidden";
+    document.body.style.overflowX = "hidden";
 
     return () => {
       document.body.style.overflow = previousOverflow;
+      document.body.style.overflowX = "";
     };
   }, [isMobile]);
 
