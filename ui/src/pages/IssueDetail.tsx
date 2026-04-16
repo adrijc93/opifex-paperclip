@@ -669,6 +669,7 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
       ) : null}
       <IssueChatThread
         composerRef={composerRef}
+        issueId={issueId}
         comments={commentsWithRunMeta}
         feedbackVotes={feedbackVotes}
         feedbackDataSharingPreference={feedbackDataSharingPreference}

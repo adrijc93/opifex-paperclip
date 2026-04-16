@@ -248,6 +248,7 @@ interface IssueChatThreadProps {
   stoppingRunId?: string | null;
   onImageClick?: (src: string) => void;
   composerRef?: Ref<IssueChatComposerHandle>;
+  issueId?: string;
 }
 
 type IssueChatErrorBoundaryProps = {
@@ -1882,9 +1883,11 @@ export function IssueChatThread({
   stoppingRunId = null,
   onImageClick,
   composerRef,
+  issueId,
 }: IssueChatThreadProps) {
   const location = useLocation();
   const hasScrolledRef = useRef(false);
+  const autoScrollDoneRef = useRef(false);
   const bottomAnchorRef = useRef<HTMLDivElement | null>(null);
   const composerViewportAnchorRef = useRef<HTMLDivElement | null>(null);
   const composerViewportSnapshotRef = useRef<ReturnType<typeof captureComposerViewportSnapshot>>(null);
@@ -2016,6 +2019,18 @@ export function IssueChatThread({
     hasScrolledRef.current = true;
     element.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [location.hash, messages]);
+
+  useEffect(() => {
+    autoScrollDoneRef.current = false;
+  }, [issueId]);
+
+  useEffect(() => {
+    if (autoScrollDoneRef.current) return;
+    if (messages.length < 3) return;
+    if (!bottomAnchorRef.current) return;
+    bottomAnchorRef.current.scrollIntoView({ behavior: "auto", block: "end" });
+    autoScrollDoneRef.current = true;
+  }, [issueId, messages.length]);
 
   function handleJumpToLatest() {
     bottomAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
