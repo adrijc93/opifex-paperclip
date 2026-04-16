@@ -69,7 +69,7 @@ export function IssueRow({
         selected ? "hover:bg-transparent" : "hover:bg-accent/50",
         className,
       )}
-      style={projectColor ? { border: `1px solid ${projectColor}`, borderRadius: "6px", marginBottom: "2px" } : undefined}
+      style={projectColor ? { border: `2px solid ${projectColor}`, borderRadius: "6px", marginBottom: "2px" } : undefined}
     >
       <span className="shrink-0 pt-px sm:hidden">
         {mobileLeading ?? <StatusIcon status={issue.status} className={selectedStatusClass} />}

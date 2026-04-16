@@ -13,6 +13,7 @@ import { agentsApi } from "../api/agents";
 import { heartbeatsApi } from "../api/heartbeats";
 import { instanceSettingsApi } from "../api/instanceSettings";
 import { projectsApi } from "../api/projects";
+import { goalsApi } from "../api/goals";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useGeneralSettings } from "../context/GeneralSettingsContext";
@@ -89,6 +90,7 @@ import {
   UserPlus,
   Search,
   ListTree,
+  Target,
 } from "lucide-react";
 
 const INBOX_HEARTBEAT_RUN_LIMIT = 200;
@@ -632,6 +634,9 @@ export function Inbox() {
   const experimentalSettingsLoaded = experimentalSettings !== undefined;
   const [searchQuery, setSearchQuery] = useState("");
   const normalizedSearchQuery = searchQuery.trim();
+  const [filterGoalId, setFilterGoalId] = useState<string | null>(() => {
+    try { return localStorage.getItem("paperclip.inbox.filterGoalId") || null; } catch { return null; }
+  });
   const [filterPreferences, setFilterPreferences] = useState<InboxFilterPreferences>(
     () => loadInboxFilterPreferences(selectedCompanyId),
   );
@@ -672,6 +677,11 @@ export function Inbox() {
   const { data: projects } = useQuery({
     queryKey: queryKeys.projects.list(selectedCompanyId!),
     queryFn: () => projectsApi.list(selectedCompanyId!),
+    enabled: !!selectedCompanyId,
+  });
+  const { data: goals } = useQuery({
+    queryKey: queryKeys.goals.list(selectedCompanyId!),
+    queryFn: () => goalsApi.list(selectedCompanyId!),
     enabled: !!selectedCompanyId,
   });
   const { data: labels } = useQuery({
@@ -1003,10 +1013,38 @@ export function Inbox() {
     [approvalsToRender, issuesToRender, showApprovalsCategory, showTouchedCategory, tab, failedRunsForTab, joinRequestsForTab],
   );
 
+  const projectIdsForGoal = useMemo(() => {
+    if (!filterGoalId || !projects) return null;
+    const ids = new Set<string>();
+    for (const p of projects) {
+      if (p.goalId === filterGoalId || p.goalIds?.includes(filterGoalId)) {
+        ids.add(p.id);
+      }
+    }
+    return ids;
+  }, [filterGoalId, projects]);
+
   const filteredWorkItems = useMemo(() => {
     const q = normalizedSearchQuery.toLowerCase();
-    if (!q) return workItemsToRender;
+    const hasGoalFilter = !!filterGoalId;
+    if (!q && !hasGoalFilter) return workItemsToRender;
     return workItemsToRender.filter((item) => {
+      if (hasGoalFilter) {
+        let issueForFilter: Issue | undefined;
+        if (item.kind === "issue") issueForFilter = item.issue;
+        else if (item.kind === "failed_run") {
+          const linkedId = readIssueIdFromRun(item.run);
+          if (linkedId) issueForFilter = issueById.get(linkedId);
+        }
+        if (issueForFilter) {
+          const matchesGoalDirectly = issueForFilter.goalId === filterGoalId;
+          const matchesGoalViaProject = issueForFilter.projectId ? projectIdsForGoal?.has(issueForFilter.projectId) ?? false : false;
+          if (!matchesGoalDirectly && !matchesGoalViaProject) return false;
+        } else if (item.kind === "issue" || item.kind === "failed_run") {
+          return false;
+        }
+      }
+      if (!q) return true;
       if (item.kind === "issue") {
         return matchesInboxIssueSearch(item.issue, q, {
           isolatedWorkspacesEnabled,
@@ -1052,6 +1090,8 @@ export function Inbox() {
     issueById,
     isolatedWorkspacesEnabled,
     normalizedSearchQuery,
+    filterGoalId,
+    projectIdsForGoal,
     projectWorkspaceById,
   ]);
 
@@ -1890,6 +1930,56 @@ export function Inbox() {
             iconOnly
             workspaces={isolatedWorkspacesEnabled ? executionWorkspaces.filter((w) => w.mode === "isolated_workspace" && w.status === "active").map((w) => ({ id: w.id, name: w.name })) : undefined}
           />
+          {(goals?.length ?? 0) > 0 && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className={cn("h-8 w-8 shrink-0", filterGoalId && "bg-accent text-blue-600 dark:text-blue-400")}
+                  title="Filter by goal"
+                >
+                  <Target className="h-3.5 w-3.5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-[min(280px,calc(100vw-2rem))] p-2">
+                <div className="space-y-1">
+                  <button
+                    className={cn(
+                      "w-full text-left px-2 py-1.5 text-xs rounded-md transition-colors",
+                      !filterGoalId ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent",
+                    )}
+                    onClick={() => {
+                      setFilterGoalId(null);
+                      try { localStorage.removeItem("paperclip.inbox.filterGoalId"); } catch {}
+                    }}
+                  >
+                    All goals
+                  </button>
+                  {(goals ?? []).map((g) => (
+                    <button
+                      key={g.id}
+                      className={cn(
+                        "w-full text-left px-2 py-1.5 text-xs rounded-md transition-colors truncate",
+                        filterGoalId === g.id ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent",
+                      )}
+                      onClick={() => {
+                        const next = filterGoalId === g.id ? null : g.id;
+                        setFilterGoalId(next);
+                        try {
+                          if (next) localStorage.setItem("paperclip.inbox.filterGoalId", next);
+                          else localStorage.removeItem("paperclip.inbox.filterGoalId");
+                        } catch {}
+                      }}
+                    >
+                      {g.title}
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
           <Popover>
             <PopoverTrigger asChild>
               <Button
