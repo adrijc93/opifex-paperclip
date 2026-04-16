@@ -3040,8 +3040,34 @@ export function heartbeatService(db: Db) {
       const latestRetryReason = readNonEmptyString(latestContext.retryReason);
 
       if (issue.status === "todo") {
-        if (!latestRun || latestRun.status === "succeeded") {
+        if (latestRun?.status === "succeeded") {
           result.skipped += 1;
+          continue;
+        }
+
+        // SEC-123 no-history rescue: assigneeAgentId set but zero run history and
+        // issue has been stale > 15min — initial wakeup likely never persisted
+        // (DB blip during enqueueWakeup). Queue an assignment recovery.
+        if (!latestRun) {
+          const noHistoryAgeMs = Date.now() - new Date(issue.updatedAt).getTime();
+          if (noHistoryAgeMs < 15 * 60 * 1000) {
+            result.skipped += 1;
+            continue;
+          }
+          const queued = await enqueueStrandedIssueRecovery({
+            issueId: issue.id,
+            agentId,
+            reason: "issue_assignment_recovery",
+            retryReason: "assignment_recovery",
+            source: "issue.no_history_recovery",
+            retryOfRunId: null,
+          });
+          if (queued) {
+            result.dispatchRequeued += 1;
+            result.issueIds.push(issue.id);
+          } else {
+            result.skipped += 1;
+          }
           continue;
         }
 
