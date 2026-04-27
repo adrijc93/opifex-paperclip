@@ -323,8 +323,8 @@ importers:
         version: 19.2.5
     devDependencies:
       '@paperclipai/plugin-sdk':
-        specifier: 2026.331.0-canary.4
-        version: 2026.331.0-canary.4(react@19.2.5)
+        specifier: 2026.427.0
+        version: 2026.427.0(react@19.2.5)
       '@rollup/plugin-node-resolve':
         specifier: ^16.0.1
         version: 16.0.3(rollup@4.60.1)
@@ -2451,15 +2451,6 @@ packages:
   '@paperclipai/adapter-utils@2026.325.0':
     resolution: {integrity: sha512-YDVSAgjkeJ0PvxXDJVN9MZDX7oYRzidLtGHmGgRGd6gSk/bF2ygAKvND4FI1YxDc/cRLQjqAFCpCYaC/9wqIEA==}
 
-  '@paperclipai/plugin-sdk@2026.331.0-canary.4':
-    resolution: {integrity: sha512-HQprCmn/Xabn0PqYJqsiXZzveOGkOYnJ+2KJ8E0QYz2LUGDvX2g/zfkIWINxUtUNVbiidGtmRgXC+cbwgnalIg==}
-    hasBin: true
-    peerDependencies:
-      react: '>=18'
-    peerDependenciesMeta:
-      react:
-        optional: true
-
   '@paperclipai/plugin-sdk@2026.427.0':
     resolution: {integrity: sha512-nmEg133QbVHWsqchyKAk7muiXy6m/PTSKlEHcpgnnQuI3A+OKROJf3RaENDN1bpgSsQJiiLfF90/hm3zH7N5vw==}
     hasBin: true
@@ -2477,9 +2468,6 @@ packages:
     peerDependenciesMeta:
       react:
         optional: true
-
-  '@paperclipai/shared@2026.331.0-canary.4':
-    resolution: {integrity: sha512-QPDH21ZZVbWUiY0f1V73rS0qSgIwZWH3voDKXYM8oqLSwQWjJ5r/aiZvsGFHVcrhOPcwsnyJMyQhcKqkYQe0Og==}
 
   '@paperclipai/shared@2026.427.0':
     resolution: {integrity: sha512-NX3/xd5isVfrRIGaPWZNVSYhPAka9Xo96Vb54wwzdrAIGl3vQf9QMAREv0CiXnPbCXSBCjwjNn0ldFb6j/byhA==}
@@ -8730,13 +8718,6 @@ snapshots:
 
   '@paperclipai/adapter-utils@2026.325.0': {}
 
-  '@paperclipai/plugin-sdk@2026.331.0-canary.4(react@19.2.5)':
-    dependencies:
-      '@paperclipai/shared': 2026.331.0-canary.4
-      zod: 3.25.76
-    optionalDependencies:
-      react: 19.2.5
-
   '@paperclipai/plugin-sdk@2026.427.0(react@19.2.5)':
     dependencies:
       '@paperclipai/shared': 2026.427.0
@@ -8750,10 +8731,6 @@ snapshots:
       zod: 3.25.76
     optionalDependencies:
       react: 19.2.5
-
-  '@paperclipai/shared@2026.331.0-canary.4':
-    dependencies:
-      zod: 3.25.76
 
   '@paperclipai/shared@2026.427.0':
     dependencies:
