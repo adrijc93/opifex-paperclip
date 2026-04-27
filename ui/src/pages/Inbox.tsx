@@ -24,7 +24,9 @@ import {
   countActiveIssueFilters,
   type IssueFilterState,
 } from "../lib/issue-filters";
+import { collectLiveIssueIds } from "../lib/liveIssueIds";
 import { formatAssigneeUserLabel } from "../lib/assignees";
+import { buildCompanyUserLabelMap, buildCompanyUserProfileMap } from "../lib/company-members";
 import {
   armIssueDetailInboxQuickArchive,
   createIssueDetailLocationState,
@@ -94,6 +96,7 @@ import {
 } from "lucide-react";
 
 const INBOX_HEARTBEAT_RUN_LIMIT = 200;
+const INBOX_ISSUE_LIST_LIMIT = 500;
 import { Input } from "@/components/ui/input";
 import { PageTabBar } from "../components/PageTabBar";
 import type { Approval, HeartbeatRun, Issue, JoinRequest } from "@paperclipai/shared";
@@ -136,6 +139,7 @@ import {
   type InboxIssueColumn,
   type InboxKeyboardNavEntry,
   saveLastInboxTab,
+  shouldShowCompanyAlerts,
   shouldShowInboxSection,
   type InboxGroupedSection,
   type InboxTab,
@@ -184,6 +188,39 @@ function readIssueIdFromRun(run: HeartbeatRun): string | null {
   if (typeof taskId === "string" && taskId.length > 0) return taskId;
 
   return null;
+}
+
+function nonEmptyLabel(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+export function formatJoinRequestInboxLabel(
+  joinRequest: Pick<
+    JoinRequest,
+    "requestType" | "agentName" | "requestEmailSnapshot" | "requestingUserId"
+  > & {
+    requesterUser?: {
+      name: string | null;
+      email: string | null;
+    } | null;
+  },
+) {
+  if (joinRequest.requestType !== "human") {
+    return `Agent join request${joinRequest.agentName ? `: ${joinRequest.agentName}` : ""}`;
+  }
+
+  const requesterName = nonEmptyLabel(joinRequest.requesterUser?.name);
+  const requesterEmail =
+    nonEmptyLabel(joinRequest.requesterUser?.email) ??
+    nonEmptyLabel(joinRequest.requestEmailSnapshot);
+  const requesterId = nonEmptyLabel(joinRequest.requestingUserId);
+
+  if (requesterName && requesterEmail) return `${requesterName} (${requesterEmail})`;
+  if (requesterEmail) return requesterEmail;
+  if (requesterName) return requesterName;
+  if (requesterId) return requesterId;
+  return "Human join request";
 }
 
 
@@ -512,10 +549,7 @@ function JoinRequestInboxRow({
   selected?: boolean;
   className?: string;
 }) {
-  const label =
-    joinRequest.requestType === "human"
-      ? "Human join request"
-      : `Agent join request${joinRequest.agentName ? `: ${joinRequest.agentName}` : ""}`;
+  const label = formatJoinRequestInboxLabel(joinRequest);
   const showUnreadSlot = unreadState !== null;
   const showUnreadDot = unreadState === "visible" || unreadState === "fading";
 
@@ -692,9 +726,9 @@ export function Inbox() {
   const isolatedWorkspacesEnabled = experimentalSettings?.enableIsolatedWorkspaces === true;
   const { data: executionWorkspaces = [] } = useQuery({
     queryKey: selectedCompanyId
-      ? queryKeys.executionWorkspaces.list(selectedCompanyId)
+      ? queryKeys.executionWorkspaces.summaryList(selectedCompanyId)
       : ["execution-workspaces", "__disabled__"],
-    queryFn: () => executionWorkspacesApi.list(selectedCompanyId!),
+    queryFn: () => executionWorkspacesApi.listSummaries(selectedCompanyId!),
     enabled: !!selectedCompanyId && isolatedWorkspacesEnabled,
   });
 
@@ -754,7 +788,11 @@ export function Inbox() {
 
   const { data: issues, isLoading: isIssuesLoading } = useQuery({
     queryKey: [...queryKeys.issues.list(selectedCompanyId!), "with-routine-executions"],
-    queryFn: () => issuesApi.list(selectedCompanyId!, { includeRoutineExecutions: true }),
+    queryFn: () =>
+      issuesApi.list(selectedCompanyId!, {
+        includeRoutineExecutions: true,
+        limit: INBOX_ISSUE_LIST_LIMIT,
+      }),
     enabled: !!selectedCompanyId,
   });
   const {
@@ -768,6 +806,7 @@ export function Inbox() {
         inboxArchivedByUserId: "me",
         status: INBOX_MINE_ISSUE_STATUS_FILTER,
         includeRoutineExecutions: true,
+        limit: INBOX_ISSUE_LIST_LIMIT,
       }),
     enabled: !!selectedCompanyId,
   });
@@ -781,6 +820,7 @@ export function Inbox() {
         touchedByUserId: "me",
         status: INBOX_MINE_ISSUE_STATUS_FILTER,
         includeRoutineExecutions: true,
+        limit: INBOX_ISSUE_LIST_LIMIT,
       }),
     enabled: !!selectedCompanyId,
   });
@@ -797,17 +837,32 @@ export function Inbox() {
     enabled: !!selectedCompanyId,
     refetchInterval: 5000,
   });
+  const liveIssueIds = useMemo(() => collectLiveIssueIds(liveRuns), [liveRuns]);
+  const { data: companyMembers } = useQuery({
+    queryKey: queryKeys.access.companyUserDirectory(selectedCompanyId!),
+    queryFn: () => accessApi.listUserDirectory(selectedCompanyId!),
+    enabled: !!selectedCompanyId,
+  });
   const currentUserId = session?.user.id ?? session?.session.userId ?? null;
+
+  const companyUserLabelMap = useMemo(
+    () => buildCompanyUserLabelMap(companyMembers?.users),
+    [companyMembers?.users],
+  );
+  const companyUserProfileMap = useMemo(
+    () => buildCompanyUserProfileMap(companyMembers?.users),
+    [companyMembers?.users],
+  );
 
   const mineIssues = useMemo(() => getRecentTouchedIssues(mineIssuesRaw), [mineIssuesRaw]);
   const touchedIssues = useMemo(() => getRecentTouchedIssues(touchedIssuesRaw), [touchedIssuesRaw]);
   const visibleMineIssues = useMemo(
-    () => applyIssueFilters(mineIssues, issueFilters, currentUserId, true),
-    [mineIssues, issueFilters, currentUserId],
+    () => applyIssueFilters(mineIssues, issueFilters, currentUserId, true, liveIssueIds),
+    [mineIssues, issueFilters, currentUserId, liveIssueIds],
   );
   const visibleTouchedIssues = useMemo(
-    () => applyIssueFilters(touchedIssues, issueFilters, currentUserId, true),
-    [touchedIssues, issueFilters, currentUserId],
+    () => applyIssueFilters(touchedIssues, issueFilters, currentUserId, true, liveIssueIds),
+    [touchedIssues, issueFilters, currentUserId, liveIssueIds],
   );
   const unreadTouchedIssues = useMemo(
     () => visibleTouchedIssues.filter((issue) => issue.isUnreadForMe),
@@ -961,23 +1016,15 @@ export function Inbox() {
       ),
     [heartbeatRuns, dismissedAtByKey],
   );
-  const liveIssueIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const run of liveRuns ?? []) {
-      if (run.issueId) ids.add(run.issueId);
-    }
-    return ids;
-  }, [liveRuns]);
-
   const approvalsToRender = useMemo(() => {
-    let filtered = getApprovalsForTab(approvals ?? [], tab, allApprovalFilter);
+    let filtered = getApprovalsForTab(approvals ?? [], tab, allApprovalFilter, currentUserId);
     if (tab === "mine") {
       filtered = filtered.filter(
         (a) => !isInboxEntityDismissed(dismissedAtByKey, `approval:${a.id}`, a.updatedAt),
       );
     }
     return filtered;
-  }, [approvals, tab, allApprovalFilter, dismissedAtByKey]);
+  }, [approvals, tab, allApprovalFilter, currentUserId, dismissedAtByKey]);
   const showJoinRequestsCategory =
     allCategoryFilter === "everything" || allCategoryFilter === "join_requests";
   const showTouchedCategory =
@@ -1146,12 +1193,14 @@ export function Inbox() {
         issueFilters,
         currentUserId,
         enableRoutineVisibilityFilter: true,
+        liveIssueIds,
       }),
     [
       archivedSearchIssues,
       currentUserId,
       filteredWorkItems,
       issueFilters,
+      liveIssueIds,
       normalizedSearchQuery,
       remoteIssueSearchResults,
     ],
@@ -1186,6 +1235,16 @@ export function Inbox() {
       const next = new Set(prev);
       if (next.has(groupKey)) next.delete(groupKey);
       else next.add(groupKey);
+      saveCollapsedInboxGroupKeys(selectedCompanyId, next);
+      return next;
+    });
+  }, [selectedCompanyId]);
+  const setGroupCollapsed = useCallback((groupKey: string, collapsed: boolean) => {
+    setCollapsedGroupKeys((prev) => {
+      if (collapsed ? prev.has(groupKey) : !prev.has(groupKey)) return prev;
+      const next = new Set(prev);
+      if (collapsed) next.add(groupKey);
+      else next.delete(groupKey);
       saveCollapsedInboxGroupKeys(selectedCompanyId, next);
       return next;
     });
@@ -1240,6 +1299,13 @@ export function Inbox() {
     const map = new Map<string, number>();
     flatNavItems.forEach((entry, index) => {
       if (entry.type === "child") map.set(entry.issueId, index);
+    });
+    return map;
+  }, [flatNavItems]);
+  const groupFlatIndex = useMemo(() => {
+    const map = new Map<string, number>();
+    flatNavItems.forEach((entry, index) => {
+      if (entry.type === "group") map.set(entry.groupKey, index);
     });
     return map;
   }, [flatNavItems]);
@@ -1610,6 +1676,7 @@ export function Inbox() {
     markUnreadIssue: (id: string) => markUnreadMutation.mutate(id),
     markNonIssueRead: handleMarkNonIssueRead,
     markNonIssueUnread: markItemUnread,
+    setGroupCollapsed,
     navigate,
   });
   kbActionsRef.current = {
@@ -1620,6 +1687,7 @@ export function Inbox() {
     markUnreadIssue: (id: string) => markUnreadMutation.mutate(id),
     markNonIssueRead: handleMarkNonIssueRead,
     markNonIssueUnread: markItemUnread,
+    setGroupCollapsed,
     navigate,
   };
 
@@ -1676,18 +1744,30 @@ export function Inbox() {
         const entry = navItems[idx];
         if (!entry) return {};
         if (entry.type === "child") return { issue: entry.issue };
-        return { item: entry.item };
+        if (entry.type === "top") return { item: entry.item };
+        return {};
       };
 
       switch (e.key) {
-        case "j": {
+        case "j":
+        case "ArrowDown": {
           e.preventDefault();
           setSelectedIndex((prev) => getInboxKeyboardSelectionIndex(prev, navCount, "next"));
           break;
         }
-        case "k": {
+        case "k":
+        case "ArrowUp": {
           e.preventDefault();
           setSelectedIndex((prev) => getInboxKeyboardSelectionIndex(prev, navCount, "previous"));
+          break;
+        }
+        case "ArrowLeft":
+        case "ArrowRight": {
+          if (st.selectedIndex < 0 || st.selectedIndex >= navCount) return;
+          const entry = navItems[st.selectedIndex];
+          if (!entry || entry.type !== "group") return;
+          e.preventDefault();
+          act.setGroupCollapsed(entry.groupKey, e.key === "ArrowLeft");
           break;
         }
         case "a":
@@ -1785,12 +1865,15 @@ export function Inbox() {
   }
 
   const hasRunFailures = failedRuns.length > 0;
+  const showCompanyAlerts = shouldShowCompanyAlerts(tab) && showAlertsCategory;
   const showAggregateAgentError =
+    showCompanyAlerts &&
     !!dashboard &&
     dashboard.agents.error > 0 &&
     !hasRunFailures &&
     !dismissedAlerts.has("alert:agent-errors");
   const showBudgetAlert =
+    showCompanyAlerts &&
     !!dashboard &&
     dashboard.costs.monthBudgetCents > 0 &&
     dashboard.costs.monthUtilizationPercent >= 80 &&
@@ -1800,10 +1883,10 @@ export function Inbox() {
   const showAlertsSection = shouldShowInboxSection({
     tab,
     hasItems: hasAlerts,
-    showOnMine: hasAlerts,
-    showOnRecent: hasAlerts,
-    showOnUnread: hasAlerts,
-    showOnAll: showAlertsCategory && hasAlerts,
+    showOnMine: false,
+    showOnRecent: false,
+    showOnUnread: false,
+    showOnAll: hasAlerts,
   });
 
   const visibleSections = [
@@ -1928,7 +2011,7 @@ export function Inbox() {
             enableRoutineVisibilityFilter
             buttonVariant="outline"
             iconOnly
-            workspaces={isolatedWorkspacesEnabled ? executionWorkspaces.filter((w) => w.mode === "isolated_workspace" && w.status === "active").map((w) => ({ id: w.id, name: w.name })) : undefined}
+            workspaces={isolatedWorkspacesEnabled ? executionWorkspaces.filter((w) => w.mode === "isolated_workspace").map((w) => ({ id: w.id, name: w.name })) : undefined}
           />
           {(goals?.length ?? 0) > 0 && (
             <Popover>
@@ -2129,7 +2212,7 @@ export function Inbox() {
         <>
           {showSeparatorBefore("work_items") && <Separator />}
           <div>
-            <div ref={listRef} className="overflow-hidden rounded-xl border border-border bg-card">
+            <div ref={listRef} className="overflow-hidden rounded-xl bg-card">
               {(() => {
                 const renderInboxIssue = ({
                   issue,
@@ -2154,6 +2237,9 @@ export function Inbox() {
                   const isFading = fadingOutIssues.has(issue.id);
                   const isArchiving = archivingIssueIds.has(issue.id);
                   const project = issue.projectId ? projectById.get(issue.projectId) ?? null : null;
+                  const assigneeUserProfile = issue.assigneeUserId
+                    ? companyUserProfileMap.get(issue.assigneeUserId) ?? null
+                    : null;
                   return (
                     <IssueRow
                       key={`issue:${issue.id}`}
@@ -2230,6 +2316,12 @@ export function Inbox() {
                               defaultProjectWorkspaceIdByProjectId,
                             })}
                             assigneeName={agentName(issue.assigneeAgentId)}
+                            assigneeUserName={
+                              formatAssigneeUserLabel(issue.assigneeUserId, currentUserId, companyUserLabelMap)
+                              ?? assigneeUserProfile?.label
+                              ?? null
+                            }
+                            assigneeUserAvatarUrl={assigneeUserProfile?.image ?? null}
                             currentUserId={currentUserId}
                             parentIdentifier={issue.parentId ? (issueById.get(issue.parentId)?.identifier ?? null) : null}
                             parentTitle={issue.parentId ? (issueById.get(issue.parentId)?.title ?? null) : null}
@@ -2262,13 +2354,20 @@ export function Inbox() {
                     );
                   }
                   if (group.label) {
+                    const groupNavIdx = groupFlatIndex.get(group.key) ?? -1;
+                    const isGroupSelected = groupNavIdx >= 0 && selectedIndex === groupNavIdx;
                     elements.push(
                       <div
                         key={`group-${group.key}`}
+                        data-inbox-item
                         className={cn(
                           "px-3 sm:px-4",
                           groupIndex > 0 && "pt-2",
+                          isGroupSelected && "bg-accent/50",
                         )}
+                        onClick={() => {
+                          if (groupNavIdx >= 0) setSelectedIndex(groupNavIdx);
+                        }}
                       >
                         <IssueGroupHeader
                           label={group.label}
